@@ -1,0 +1,2151 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Planning production — LOR DIFFUSION</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<style>
+  :root{
+    --bg:#eef1f4;
+    --paper:#ffffff;
+    --ink:#1c2733;
+    --ink-soft:#5a6472;
+    --line:#d9dee4;
+    --accent:#c0392b;       /* postmark red — the one signature color */
+    --a-faire:#8a8f98;
+    --en-cours:#3d6fa8;
+    --termine:#3f7d3f;
+    --en-retard:#c0392b;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size:13px;
+  }
+  .mono{ font-family:'Courier New', Courier, monospace; }
+
+  /* ---- header ---- */
+  header{
+    background:var(--paper); border-bottom:1px solid var(--line);
+    padding:12px 22px; display:flex; align-items:center; justify-content:space-between;
+    flex-wrap:wrap; gap:12px; position:sticky; top:0; z-index:50;
+  }
+  header h1{ margin:0 0 6px 0; font-size:18px; letter-spacing:0.3px; }
+  header h1 span{ color:var(--accent); }
+  .header-left{ display:flex; flex-direction:column; }
+
+  .tabs{ display:flex; gap:4px; }
+  .tab-btn{
+    background:transparent; color:var(--ink-soft); border:1px solid transparent;
+    padding:7px 13px; font-size:12.5px; font-weight:bold; border-radius:5px; cursor:pointer;
+  }
+  .tab-btn:hover{ background:#f2f4f6; }
+  .tab-btn.active{ background:var(--ink); color:#fff; }
+
+  .week-nav{ display:flex; align-items:center; gap:10px; font-size:13px; }
+  .week-nav b{ min-width:190px; text-align:center; display:inline-block; }
+  button{
+    font-family:inherit; cursor:pointer; border:none; border-radius:4px;
+    padding:8px 14px; font-size:12.5px; font-weight:bold;
+    background:var(--ink); color:#fff;
+  }
+  button:hover{ opacity:0.88; }
+  button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button.accent{ background:var(--accent); }
+  button.small{ padding:4px 9px; font-size:11.5px; font-weight:normal; border-radius:3px; }
+
+  main{ max-width:1400px; margin:0 auto; padding:18px 22px 60px 22px; }
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  /* ---- dashboard stats ---- */
+  .stats{ display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; margin-bottom:8px; }
+  .stat-card{
+    background:var(--paper); border:1px solid var(--line); border-radius:5px;
+    padding:6px 10px; position:relative; overflow:hidden; display:flex; align-items:center; gap:8px;
+  }
+  .stat-card .num{ font-size:16px; font-weight:bold; line-height:1; font-family:'Courier New', monospace; }
+  .stat-card .label{ font-size:9.5px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px; line-height:1.15; }
+  .stat-card::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:3px; }
+  .stat-card.c-total::before{ background:var(--ink); }
+  .stat-card.c-afaire::before{ background:var(--a-faire); }
+  .stat-card.c-encours::before{ background:var(--en-cours); }
+  .stat-card.c-termine::before{ background:var(--termine); }
+  .stat-card.c-retard::before{ background:var(--en-retard); }
+
+  /* ---- weekly time-grid table: one row per hour, auto-height so content never gets clipped ---- */
+  .board-toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
+  .board-filters{
+    display:flex; align-items:center; gap:6px; margin-bottom:8px; font-size:12px; flex-wrap:wrap;
+  }
+  .board-filters label{ font-weight:bold; color:var(--ink-soft); }
+  .board-filters select{ padding:5px 8px; border:1px solid var(--line); border-radius:4px; font-size:12px; }
+  .board-wrap{ overflow-x:auto; border:1px solid var(--line); border-radius:6px; background:var(--paper); }
+  table.planning{ width:100%; border-collapse:collapse; min-width:900px; table-layout:fixed; }
+  table.planning th, table.planning td{ border:1px solid var(--line); vertical-align:top; }
+  table.planning thead th{ background:#f7f8f9; padding:8px 10px; text-align:left; }
+  table.planning thead th .dname{ font-weight:bold; font-size:13px; }
+  table.planning thead th .ddate{ font-size:11px; color:var(--ink-soft); font-family:'Courier New', monospace; }
+  table.planning thead th.today-col{ background:#fdf1ef; }
+  th.hour-col-head{ width:64px; background:#f0f1f3 !important; }
+  td.hour-cell{
+    background:#f7f8f9; font-size:11.5px; font-weight:bold; color:var(--ink-soft);
+    text-align:center; padding:6px 4px; white-space:nowrap; font-family:'Courier New', monospace;
+  }
+  td.slot-cell{
+    padding:5px; cursor:pointer; width:18%; min-height:40px; position:relative;
+  }
+  td.slot-cell:hover{ background:#f4f7fa; }
+  td.slot-cell.today-col{ background:#fffaf9; }
+  td.slot-cell.today-col:hover{ background:#fdf0ee; }
+  td.slot-cell.break-slot{ background:#ececec; }
+  td.slot-cell.break-slot:hover{ background:#e2e2e2; }
+  td.hour-cell.break-slot{ background:#e2e2e2; }
+  td.slot-cell.drag-over{ background:#eaf1fb; outline:2px dashed var(--en-cours); outline-offset:-2px; }
+
+  /* Thin colored line(s) on continuation rows, showing a task is still running through this hour */
+  .continuation-bars{ display:flex; gap:8px; height:100%; min-height:26px; padding:2px 0; flex-wrap:wrap; }
+  .continuation-item{ display:flex; align-items:center; gap:4px; cursor:pointer; }
+  .continuation-bar{ width:5px; align-self:stretch; border-radius:3px; flex:none; }
+  .continuation-ref{ font-family:'Courier New', monospace; font-size:10.5px; color:var(--ink-soft); white-space:nowrap; }
+
+  .postmark{
+    width:24px; height:24px; border-radius:50%; border:2px dashed var(--accent);
+    color:var(--accent); display:flex; align-items:center; justify-content:center;
+    font-size:6px; font-weight:bold; text-align:center; transform:rotate(-8deg);
+    font-family:'Courier New', monospace; line-height:1.05; flex:none;
+  }
+
+  .task-card{
+    background:#fff; border:1px solid var(--line); border-left:5px solid var(--a-faire);
+    border-radius:5px; padding:5px 8px; cursor:grab; transition:box-shadow .12s;
+    box-sizing:border-box; margin-bottom:4px;
+  }
+  .task-card:active{ cursor:grabbing; }
+  .task-card:hover{ box-shadow:0 3px 10px rgba(0,0,0,0.16); z-index:15; }
+  .task-card.st-termine{ opacity:0.65; }
+  .task-card.dragging{ opacity:0.35; }
+  .task-card .type-row{ display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+  .type-dot{ width:7px; height:7px; border-radius:50%; flex:none; }
+  .task-card .type-name{ font-size:11px; font-weight:bold; line-height:1.25; }
+  .task-card .type-name.done{ text-decoration:line-through; opacity:0.7; }
+  .task-card .ref{ font-family:'Courier New', monospace; font-size:9.5px; color:var(--ink-soft); margin-top:1px; }
+  .task-card .meta{ display:flex; justify-content:space-between; align-items:center; margin-top:4px; gap:5px; flex-wrap:wrap; }
+  .person-chip{
+    display:inline-flex; align-items:center; gap:3px; font-size:9.5px; font-weight:bold;
+    padding:1px 7px 1px 4px; border-radius:9px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    min-width:0; flex:0 1 auto;
+  }
+  .status-dots{ display:flex; gap:6px; flex:none; }
+  .status-dot{
+    width:17px; height:17px; border-radius:50%; border:2px solid #d5d9de; cursor:pointer; background:#fff;
+    flex:none; padding:0;
+  }
+  .status-dot:hover{ border-color:#9098a3; transform:scale(1.1); }
+  .status-dot.active-afaire{ background:var(--a-faire); border-color:var(--a-faire); }
+  .status-dot.active-encours{ background:var(--en-cours); border-color:var(--en-cours); }
+  .status-dot.active-termine{ background:var(--termine); border-color:var(--termine); }
+
+  /* ---- compact density mode: shrink everything so more of the day fits on screen ---- */
+  table.planning.compact th.hour-col-head{ width:52px; }
+  table.planning.compact td.hour-cell{ font-size:9.5px; padding:2px 3px; }
+  table.planning.compact td.slot-cell{ padding:2px; min-height:22px; }
+  table.planning.compact .task-card{ padding:2px 5px; margin-bottom:2px; border-left-width:3px; border-radius:3px; }
+  table.planning.compact .task-card .type-row{ gap:3px; }
+  table.planning.compact .type-dot{ width:6px; height:6px; }
+  table.planning.compact .task-card .type-name{ font-size:10.5px; line-height:1.15; }
+  table.planning.compact .task-card .ref{ font-size:9px; margin-top:0; }
+  table.planning.compact .task-card .meta{ margin-top:1px; gap:3px; }
+  table.planning.compact .person-chip{ font-size:8.5px; padding:0 5px; border-radius:8px; }
+  table.planning.compact .status-dot{ width:13px; height:13px; }
+  table.planning.compact .status-dots{ gap:2px; }
+  table.planning.compact .urgent-flag, table.planning.compact .recur-flag, table.planning.compact .note-icon{ font-size:9px; }
+  table.planning.compact .continuation-bars{ min-height:14px; gap:5px; padding:1px 0; }
+  table.planning.compact .continuation-ref{ font-size:9px; }
+  table.planning.compact thead th{ padding:5px 8px; }
+  table.planning.compact thead th .dname{ font-size:11.5px; }
+  table.planning.compact thead th .ddate{ font-size:9.5px; }
+  table.planning.compact .postmark{ width:18px; height:18px; font-size:5px; }
+
+  /* ---- dossiers overview ---- */
+  .section-title{ font-size:15px; font-weight:bold; margin:30px 0 12px 0; display:flex; align-items:center; gap:8px; }
+  .section-title .accent-dot{ width:8px; height:8px; border-radius:50%; background:var(--accent); }
+  table.dossiers{ width:100%; border-collapse:collapse; background:var(--paper); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  table.dossiers th{
+    text-align:left; padding:9px 12px; background:#f7f8f9; font-size:11px;
+    text-transform:uppercase; letter-spacing:0.3px; color:var(--ink-soft); border-bottom:1px solid var(--line);
+  }
+  table.dossiers td{ padding:9px 12px; border-bottom:1px solid #eef0f2; font-size:12.5px; vertical-align:middle; }
+  table.dossiers tr:last-child td{ border-bottom:none; }
+  .progress-bar{ width:120px; height:7px; background:#e6e9ec; border-radius:4px; overflow:hidden; }
+  .progress-bar .fill{ height:100%; background:var(--termine); }
+  .filter-row{ display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap; }
+  .filter-row input[type=search]{
+    padding:7px 10px; border:1px solid var(--line); border-radius:4px; font-size:12.5px; min-width:220px;
+  }
+
+  /* ---- catalog tabs (types de tâches / personnes) ---- */
+  .catalog-wrap{ display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .catalog-form{
+    background:var(--paper); border:1px solid var(--line); border-radius:6px; padding:16px 18px; width:280px; flex:none;
+  }
+  .catalog-form h3{ margin:0 0 12px 0; font-size:14px; }
+  .catalog-list{ flex:1; min-width:320px; background:var(--paper); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .catalog-row{
+    display:flex; align-items:center; gap:10px; padding:9px 14px; border-bottom:1px solid #eef0f2;
+  }
+  .catalog-row:last-child{ border-bottom:none; }
+  .swatch{ width:16px; height:16px; border-radius:50%; flex:none; border:1px solid rgba(0,0,0,0.1); }
+  .catalog-row .name{ flex:1; font-size:13px; }
+  .field{ margin-bottom:12px; }
+  .field label{ display:block; font-size:11.5px; font-weight:bold; color:var(--ink-soft); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.3px; }
+  .field input, .field select, .field textarea{
+    width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:4px; font-size:13px; font-family:inherit;
+    box-sizing:border-box;
+  }
+  .field input[type=color]{ padding:2px; height:38px; cursor:pointer; }
+  .field textarea{ resize:vertical; min-height:60px; }
+  .color-presets{ display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; }
+  .color-presets button{
+    width:22px; height:22px; border-radius:50%; padding:0; border:2px solid #fff; box-shadow:0 0 0 1px var(--line);
+  }
+
+  /* ---- modal ---- */
+  .overlay{
+    display:none; position:fixed; inset:0; background:rgba(20,25,32,0.55); z-index:999;
+    align-items:center; justify-content:center;
+  }
+  .overlay.open{ display:flex; }
+  .modal{
+    background:#fff; border-radius:8px; padding:20px 22px; width:440px; max-width:92vw;
+    max-height:88vh; overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,0.25);
+  }
+  .modal h3{ margin:0 0 14px 0; font-size:15px; }
+  .modal-actions{ display:flex; justify-content:space-between; gap:8px; margin-top:16px; }
+  .modal-actions .left{ display:flex; gap:8px; }
+  .status-note{ font-size:11.5px; color:var(--ink-soft); margin-top:14px; min-height:16px; }
+  .status-note.err{ color:var(--accent); font-weight:bold; }
+  select option.opt-swatch{ font-weight:bold; }
+
+  #taskDossierRecap{
+    margin-top:8px; background:#f7f8f9; border:1px solid var(--line); border-radius:5px;
+    padding:8px 10px; font-size:11.5px; line-height:1.55;
+  }
+  #taskDossierRecap .recap-title{ font-weight:bold; font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px; margin-bottom:3px; }
+  #taskDossierRecap b{ color:var(--ink-soft); font-weight:bold; }
+
+  .person-block{ border:1px solid var(--line); border-radius:6px; margin-bottom:10px; overflow:hidden; }
+
+  .person-sidebar{
+    flex:none; width:230px; background:var(--paper); border:1px solid var(--line); border-radius:6px;
+    padding:10px; max-height:640px; overflow-y:auto;
+  }
+  .person-sidebar-head{ display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:10px; }
+  .person-sidebar-head h3{ margin:0; font-size:13px; white-space:nowrap; }
+  .person-sidebar-head select{ font-size:11px; padding:3px 5px; border:1px solid var(--line); border-radius:4px; flex:1; min-width:0; }
+  .person-sidebar .person-block-head .pname{ font-size:11.5px; }
+  .person-sidebar .person-task-row{ font-size:10.5px; padding:4px 8px; flex-wrap:wrap; }
+  .person-sidebar .person-task-row .ptime{ width:52px; }
+  @media (max-width: 1150px){
+    .person-sidebar{ display:none; } /* keep the narrower calendar usable on small screens; the modal covers this need there */
+  }
+  .person-block-head{ display:flex; align-items:center; gap:8px; padding:8px 12px; background:#f7f8f9; }
+  .person-block-head .swatch{ width:12px; height:12px; }
+  .person-block-head .pname{ font-weight:bold; font-size:13px; flex:1; }
+  .person-block-head .pcount{ font-size:11px; color:var(--ink-soft); }
+  .person-task-row{ display:flex; align-items:center; gap:8px; padding:6px 12px; border-top:1px solid #eef0f2; font-size:12px; }
+  .person-task-row .ptime{ font-family:'Courier New', monospace; font-size:11px; color:var(--ink-soft); width:78px; flex:none; }
+  .person-task-row .pdot{ width:8px; height:8px; border-radius:50%; flex:none; }
+  .person-task-row .pname-task{ flex:1; }
+  .person-task-row .pref{ font-family:'Courier New', monospace; font-size:10.5px; color:var(--ink-soft); }
+  .person-empty{ padding:10px 12px; font-size:11.5px; color:#b0b5bb; font-style:italic; }
+  .badge{
+    display:inline-block; padding:2px 8px; border-radius:9px; font-size:10px; font-weight:bold; color:#fff; flex:none;
+  }
+  .badge.st-a_faire{ background:var(--a-faire); }
+  .badge.st-en_cours{ background:var(--en-cours); }
+  .badge.st-termine{ background:var(--termine); }
+
+  .chip-picker{ display:flex; flex-wrap:wrap; gap:6px; }
+  .chip-option{
+    display:flex; align-items:center; gap:5px; padding:5px 10px 5px 6px; border-radius:16px;
+    border:1.5px solid var(--line); cursor:pointer; font-size:12px; user-select:none; background:#fff;
+  }
+  .chip-option .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+  .chip-option.selected{ color:#fff; border-color:transparent; }
+  .chip-option input{ display:none; }
+
+  #taskUrgentBtn.is-urgent{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  .task-card.is-urgent{ border-top:3px solid var(--accent); }
+  .urgent-flag{ font-size:10px; }
+  .recur-flag{ font-size:9.5px; opacity:0.75; }
+
+  .note-icon{
+    position:relative; display:inline-flex; align-items:center; justify-content:center;
+    font-size:10px; cursor:help; flex:none;
+  }
+  .note-icon .note-tooltip{
+    display:none; position:absolute; bottom:130%; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff; padding:6px 9px; border-radius:5px; font-size:11px;
+    line-height:1.4; white-space:pre-wrap; width:180px; max-width:60vw; z-index:20;
+    box-shadow:0 3px 10px rgba(0,0,0,0.25); font-weight:normal; text-align:left;
+  }
+  .note-icon .note-tooltip::after{
+    content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+    border:5px solid transparent; border-top-color:var(--ink);
+  }
+  .note-icon:hover .note-tooltip{ display:block; }
+
+  .print-only{ display:none; }
+
+  @media print{
+    @page{ margin:8mm; }
+    header, main{ display:none !important; }
+    .overlay{ display:none !important; }
+    #personSummaryOverlay, #typeSummaryOverlay{
+      display:block !important; position:static !important; background:#fff; padding:0; inset:auto;
+    }
+    #personSummaryOverlay .modal, #typeSummaryOverlay .modal{ box-shadow:none; width:100%; max-width:100%; max-height:none; padding:0; margin:0; }
+    #personSummaryOverlay .no-print, #typeSummaryOverlay .no-print{ display:none !important; }
+    #personSummaryOverlay .print-only, #typeSummaryOverlay .print-only{ display:block !important; font-size:13px; margin-bottom:6px; }
+
+    .person-block{ page-break-inside:avoid; margin-bottom:4px; border-radius:3px; }
+    .person-block-head{ padding:3px 8px; }
+    .person-block-head .pname{ font-size:11px; }
+    .person-block-head .pcount{ font-size:9px; }
+    .person-block-head .swatch{ width:9px; height:9px; }
+    .person-task-row{ padding:2px 8px; font-size:10px; gap:6px; }
+    .person-task-row .ptime{ font-size:9px; width:62px; }
+    .person-task-row .pdot{ width:6px; height:6px; }
+    .person-task-row .pref{ font-size:9px; }
+    .person-empty{ padding:4px 8px; font-size:9.5px; }
+    .badge{ padding:1px 6px; font-size:8px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="authOverlay" style="display:flex; position:fixed; inset:0; background:#eef1f4; z-index:99999; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:8px; padding:28px 30px; width:320px; max-width:90vw; box-shadow:0 6px 30px rgba(0,0,0,0.2);">
+    <h2 style="margin:0 0 4px 0; font-size:17px;">📋 Planning production</h2>
+    <p style="margin:0 0 18px 0; font-size:12px; color:#5a6472;">LOR DIFFUSION — connexion requise</p>
+    <div class="field"><label>Email</label><input type="email" id="authEmail" autocomplete="username"></div>
+    <div class="field"><label>Mot de passe</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+    <button type="button" onclick="doSignIn()" style="width:100%; margin-top:6px;">Se connecter</button>
+    <p id="authMsg" style="margin:12px 0 0 0; font-size:12px; color:#c0392b; min-height:16px;"></p>
+  </div>
+</div>
+
+<header>
+  <div class="header-left">
+    <h1>📋 Planning <span>production</span> — LOR DIFFUSION</h1>
+    <nav class="tabs">
+      <button class="tab-btn active" id="tabBtnPlanning" onclick="switchTab('planning')">📅 Planning</button>
+      <button class="tab-btn" id="tabBtnTypes" onclick="switchTab('types')">🏷️ Types de tâches</button>
+      <button class="tab-btn" id="tabBtnPersonnes" onclick="switchTab('personnes')">👥 Personnes</button>
+    </nav>
+  </div>
+  <div class="week-nav" id="weekNav">
+    <button class="ghost small" onclick="changeWeek(-1)">← Semaine préc.</button>
+    <b id="weekLabel">—</b>
+    <button class="ghost small" onclick="changeWeek(1)">Semaine suiv. →</button>
+    <button class="small" onclick="goToday()">Aujourd'hui</button>
+    <span id="authUserLabel" style="font-size:11px; color:var(--ink-soft); margin-left:8px;"></span>
+    <button class="ghost small" onclick="doSignOut()">🔒 Déconnexion</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- ================= PLANNING TAB ================= -->
+  <div class="view active" id="view-planning">
+
+    <div class="board-filters">
+      <label>Jour :</label>
+      <select id="boardDayFilter" onchange="renderBoard()">
+        <option value="">Tous les jours</option>
+        <option value="lundi">Lundi</option>
+        <option value="mardi">Mardi</option>
+        <option value="mercredi">Mercredi</option>
+        <option value="jeudi">Jeudi</option>
+        <option value="vendredi">Vendredi</option>
+      </select>
+      <label style="margin-left:10px;">Personne :</label>
+      <select id="boardPersonFilter" onchange="renderBoard()">
+        <option value="">Toutes les personnes</option>
+      </select>
+      <button type="button" class="ghost small" onclick="resetBoardFilters()" style="margin-left:6px;">✕ Réinitialiser</button>
+    </div>
+
+    <div class="board-toolbar">
+      <span style="font-size:11.5px; color:var(--ink-soft);">💡 Glissez une tâche vers une autre case pour la replanifier. Plusieurs tâches peuvent partager le même créneau. Cliquez les pastilles pour changer le statut sans ouvrir la fiche.</span>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="ghost" id="densityBtn" onclick="toggleDensity()">🔎 Vue compacte</button>
+        <button type="button" class="ghost" onclick="openPersonSummaryModal()">👥 Tâches par personne</button>
+        <button type="button" class="ghost" onclick="openTypeSummaryModal()">🏷️ Tâches par type</button>
+        <button type="button" class="ghost" onclick="exportPlanningJSON()">💾 Exporter planning</button>
+        <button type="button" class="ghost" onclick="triggerImportPlanningJSON()">📥 Importer planning</button>
+        <input type="file" id="importPlanningInput" accept=".json,application/json" style="display:none" onchange="handleImportPlanningJSONFile(event)">
+        <button onclick="openTaskModal(null)">+ Nouvelle tâche</button>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:12px; align-items:flex-start;">
+      <div class="board-wrap" id="boardWrap" style="flex:1; min-width:0;">
+        <table class="planning" id="planningTable"></table>
+      </div>
+
+      <div class="person-sidebar" id="personSidebar">
+        <div class="person-sidebar-head">
+          <h3>👥 Par personne</h3>
+          <select id="personSidebarDay" onchange="renderPersonSidebar()">
+            <option value="lundi">Lundi</option>
+            <option value="mardi">Mardi</option>
+            <option value="mercredi">Mercredi</option>
+            <option value="jeudi">Jeudi</option>
+            <option value="vendredi">Vendredi</option>
+          </select>
+        </div>
+        <select id="personSidebarPerson" onchange="renderPersonSidebar()" style="width:100%; margin-bottom:10px; font-size:11px; padding:4px 6px; border:1px solid var(--line); border-radius:4px;">
+          <option value="">Toutes les personnes</option>
+        </select>
+        <div id="personSidebarBody"></div>
+      </div>
+    </div>
+
+    <div class="stats" style="grid-template-columns:repeat(6, 1fr); margin-top:8px;">
+      <div class="stat-card c-total"><div class="num" id="statTotal">0</div><div class="label">Tâches cette semaine</div></div>
+      <div class="stat-card c-afaire"><div class="num" id="statAFaire">0</div><div class="label">À faire</div></div>
+      <div class="stat-card c-encours"><div class="num" id="statEnCours">0</div><div class="label">En cours</div></div>
+      <div class="stat-card c-termine"><div class="num" id="statTermine">0</div><div class="label">Terminées</div></div>
+      <div class="stat-card c-retard"><div class="num" id="statRetard">0</div><div class="label">En retard</div></div>
+      <div class="stat-card c-retard"><div class="num" id="statUrgent">0</div><div class="label">🚨 Urgentes</div></div>
+    </div>
+
+    <div class="section-title"><span class="accent-dot"></span> Dossiers en cours (fiches de travail)</div>
+    <div class="filter-row">
+      <input type="search" id="dossierSearch" placeholder="Rechercher un dossier ou un client…" oninput="renderDossiers()">
+      <select id="dossierTypeFilter" onchange="renderDossiers()">
+        <option value="">Tous les types</option>
+        <option value="standard">📄 Standard</option>
+        <option value="enveloppe">📦 Enveloppe</option>
+      </select>
+      <span id="cloudStatusLabel" style="font-size:11.5px; color:var(--ink-soft);">Cloud : vérification…</span>
+    </div>
+    <table class="dossiers">
+      <thead><tr><th>Type</th><th>Référence</th><th>Client</th><th>Dépôt souhaité</th><th>Tâches (cette semaine)</th><th>Avancement</th></tr></thead>
+      <tbody id="dossiersBody"><tr><td colspan="6" style="color:#999; font-style:italic;">Chargement…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- ================= TYPES DE TÂCHES TAB ================= -->
+  <div class="view" id="view-types">
+    <div class="section-title"><span class="accent-dot"></span> Types de tâches</div>
+    <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Ces types alimentent le menu déroulant lors de la création d'une tâche, avec leur couleur.</p>
+    <div class="catalog-wrap">
+      <div class="catalog-form">
+        <h3 id="typeFormTitle">Ajouter un type</h3>
+        <input type="hidden" id="typeId">
+        <div class="field"><label>Nom</label><input type="text" id="typeNom" placeholder="Ex. Mise sous pli"></div>
+        <div class="field">
+          <label>Couleur</label>
+          <input type="color" id="typeCouleur" value="#3d6fa8">
+          <div class="color-presets" id="typeColorPresets"></div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button onclick="saveType()">💾 Enregistrer</button>
+          <button class="ghost" id="typeCancelBtn" style="display:none;" onclick="resetTypeForm()">Annuler</button>
+        </div>
+        <div class="status-note" id="typeFormMsg"></div>
+      </div>
+      <div class="catalog-list" id="typesList"><div class="catalog-row" style="color:#999; font-style:italic;">Chargement…</div></div>
+    </div>
+  </div>
+
+  <!-- ================= PERSONNES TAB ================= -->
+  <div class="view" id="view-personnes">
+    <div class="section-title"><span class="accent-dot"></span> Personnes</div>
+    <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Ces personnes alimentent le menu déroulant « Assigné à », avec leur couleur.</p>
+    <div class="catalog-wrap">
+      <div class="catalog-form">
+        <h3 id="personFormTitle">Ajouter une personne</h3>
+        <input type="hidden" id="personId">
+        <div class="field"><label>Nom</label><input type="text" id="personNom" placeholder="Ex. Julie"></div>
+        <div class="field">
+          <label>Couleur</label>
+          <input type="color" id="personCouleur" value="#3f7d3f">
+          <div class="color-presets" id="personColorPresets"></div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button onclick="savePerson()">💾 Enregistrer</button>
+          <button class="ghost" id="personCancelBtn" style="display:none;" onclick="resetPersonForm()">Annuler</button>
+        </div>
+        <div class="status-note" id="personFormMsg"></div>
+      </div>
+      <div class="catalog-list" id="personnesList"><div class="catalog-row" style="color:#999; font-style:italic;">Chargement…</div></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ---- task modal ---- -->
+<!-- ---- dossier detail modal ---- -->
+<!-- ---- tasks-by-person summary modal ---- -->
+<div class="overlay" id="personSummaryOverlay">
+  <div class="modal" style="width:560px; max-height:85vh;">
+    <h3 style="margin-bottom:10px;" class="no-print">👥 Tâches par personne</h3>
+    <h3 id="personSummaryPrintTitle" class="print-only" style="display:none; margin-bottom:10px;"></h3>
+    <div class="field no-print" style="margin-bottom:14px;">
+      <label>Jour</label>
+      <select id="personSummaryDay" onchange="renderPersonSummary()">
+        <option value="lundi">Lundi</option>
+        <option value="mardi">Mardi</option>
+        <option value="mercredi">Mercredi</option>
+        <option value="jeudi">Jeudi</option>
+        <option value="vendredi">Vendredi</option>
+      </select>
+    </div>
+    <div id="personSummaryBody"></div>
+    <div class="modal-actions no-print">
+      <button type="button" onclick="printPersonSummary()">🖨️ Imprimer</button>
+      <button type="button" class="ghost" onclick="closePersonSummaryModal()">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="typeSummaryOverlay">
+  <div class="modal" style="width:560px; max-height:85vh;">
+    <h3 style="margin-bottom:10px;" class="no-print">🏷️ Tâches par type</h3>
+    <h3 id="typeSummaryPrintTitle" class="print-only" style="display:none; margin-bottom:10px;"></h3>
+    <div class="field no-print" style="margin-bottom:14px;">
+      <label>Jour</label>
+      <select id="typeSummaryDay" onchange="renderTypeSummary()">
+        <option value="lundi">Lundi</option>
+        <option value="mardi">Mardi</option>
+        <option value="mercredi">Mercredi</option>
+        <option value="jeudi">Jeudi</option>
+        <option value="vendredi">Vendredi</option>
+      </select>
+    </div>
+    <div id="typeSummaryBody"></div>
+    <div class="modal-actions no-print">
+      <button type="button" onclick="printTypeSummary()">🖨️ Imprimer</button>
+      <button type="button" class="ghost" onclick="closeTypeSummaryModal()">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="dossierOverlay">
+  <div class="modal" style="width:520px;">
+    <h3 id="dossierModalTitle">Dossier</h3>
+    <div id="dossierModalBody" style="font-size:12.5px; line-height:1.6;"></div>
+    <div class="modal-actions">
+      <button type="button" class="ghost" onclick="closeDossierModal()">Fermer</button>
+      <a id="dossierOpenFicheLink" href="#" target="_blank" style="text-decoration:none;">
+        <button type="button">📄 Ouvrir dans la fiche de travail</button>
+      </a>
+    </div>
+    <p style="font-size:11px; color:var(--ink-soft); margin-top:10px;">
+      💡 Ce lien fonctionne si <code>fiche_de_travail.html</code> se trouve dans le même dossier que ce fichier planning. Sinon, ouvrez votre fiche de travail puis utilisez « Choisir une fiche » avec la référence <b id="dossierRefHint">—</b>.
+    </p>
+  </div>
+</div>
+
+<div class="overlay" id="taskOverlay">
+  <div class="modal">
+    <h3 id="taskModalTitle">Nouvelle tâche</h3>
+    <input type="hidden" id="taskId">
+
+    <div class="field">
+      <label>Dossier (fiche de travail)</label>
+      <div style="display:flex; gap:6px; margin-bottom:6px;">
+        <input type="search" id="taskDossierSearch" placeholder="Rechercher référence ou client…" oninput="populateDossierSelect()" style="flex:1;">
+        <select id="taskDossierTypeFilter" onchange="populateDossierSelect()" style="flex:none; width:150px;">
+          <option value="">Tous les types</option>
+          <option value="standard">📄 Standard</option>
+          <option value="enveloppe">📦 Enveloppe</option>
+        </select>
+      </div>
+      <select id="taskDossier" onchange="toggleDossierLibre(); updateDossierRecap();"><option value="">— Aucun dossier lié —</option></select>
+      <input type="text" id="taskDossierLibre" placeholder="Référence libre (ex. 26-501)" style="margin-top:6px; display:none;">
+      <div id="taskDossierRecap" style="display:none;"></div>
+    </div>
+
+    <div class="field">
+      <label>Type de tâche</label>
+      <select id="taskType" onchange="toggleTaskTypeLibre()"><option value="">— Choisir un type —</option></select>
+      <input type="text" id="taskTypeLibre" placeholder="Nom de la tâche…" style="margin-top:6px; display:none;">
+    </div>
+
+    <div class="field">
+      <label>Description / notes</label>
+      <textarea id="taskDescription"></textarea>
+    </div>
+
+    <div class="field">
+      <label>Semaine</label>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button type="button" class="ghost small" onclick="shiftTaskModalWeek(-1)">◀</button>
+        <b id="taskModalWeekLabel" style="font-size:12.5px; flex:1; text-align:center;">—</b>
+        <button type="button" class="ghost small" onclick="shiftTaskModalWeek(1)">▶</button>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px;">
+      <div class="field" style="flex:1;">
+        <label>Jour</label>
+        <select id="taskJour">
+          <option value="lundi">Lundi</option>
+          <option value="mardi">Mardi</option>
+          <option value="mercredi">Mercredi</option>
+          <option value="jeudi">Jeudi</option>
+          <option value="vendredi">Vendredi</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Début</label>
+        <select id="taskHeure" onchange="syncHeureFinMin()"></select>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Fin</label>
+        <select id="taskHeureFin"></select>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Statut</label>
+        <select id="taskStatut">
+          <option value="a_faire">À faire</option>
+          <option value="en_cours">En cours</option>
+          <option value="termine">Terminé</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="taskRecurrenceWrap" style="display:flex; gap:10px;">
+      <div class="field" style="flex:1;">
+        <label>Récurrence</label>
+        <select id="taskRecurrence" onchange="toggleOccurrencesField()">
+          <option value="aucune">Aucune (tâche unique)</option>
+          <option value="hebdomadaire">Toutes les semaines</option>
+          <option value="toutes_2_semaines">Toutes les 2 semaines</option>
+          <option value="mensuelle">Tous les mois (≈ toutes les 4 semaines)</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1; display:none;" id="taskOccurrencesWrap">
+        <label>Nombre d'occurrences</label>
+        <input type="number" id="taskOccurrences" value="8" min="2" max="52">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Assigné à (plusieurs possibles)</label>
+      <div id="taskAssignedToChips" class="chip-picker"></div>
+    </div>
+
+    <div class="field">
+      <label>Priorité</label>
+      <button type="button" id="taskUrgentBtn" class="ghost" onclick="toggleUrgent()">🚨 Marquer comme urgent</button>
+    </div>
+
+    <div class="modal-actions">
+      <div class="left">
+        <button type="button" class="ghost" onclick="closeTaskModal()">Annuler</button>
+        <button type="button" id="taskDuplicateBtn" class="ghost" style="display:none;" onclick="duplicateTask()">📄 Dupliquer</button>
+        <button type="button" id="taskDeleteBtn" class="accent" style="display:none;" onclick="deleteTask()">Supprimer</button>
+        <button type="button" id="taskDeleteSeriesBtn" class="accent" style="display:none;" onclick="deleteTaskSeries()">🔁 Supprimer toute la série</button>
+      </div>
+      <button type="button" onclick="saveTask()">💾 Enregistrer</button>
+    </div>
+    <div class="status-note" id="taskModalMsg"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// Même projet Firebase que la fiche de travail.
+// Collections : fiches_travail (lecture), planning_taches, planning_types_taches,
+// planning_personnes.
+// ============================================================================
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD68qb7z6X8wSGFZyV06nHryFOFIfOl9Ug",
+  authDomain: "lordiffusion-c4450.firebaseapp.com",
+  projectId: "lordiffusion-c4450",
+  storageBucket: "lordiffusion-c4450.firebasestorage.app",
+  messagingSenderId: "737750895617",
+  appId: "1:737750895617:web:ef7f7741c735538cd70400"
+};
+const FICHES_COLLECTION = "fiches_travail";
+const TASKS_COLLECTION = "planning_taches";
+const TYPES_COLLECTION = "planning_types_taches";
+const PERSONNES_COLLECTION = "planning_personnes";
+
+const COLOR_PRESETS = ['#c0392b','#e07b39','#e0b039','#3f7d3f','#2f9e8f','#3d6fa8','#6a5acd','#a24a86','#555555'];
+
+function isFirebaseConfigured(){
+  return FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("VOTRE_");
+}
+let firebaseDb = null;
+function getFirebaseDb(){
+  if(!isFirebaseConfigured()) return null;
+  if(firebaseDb) return firebaseDb;
+  try{
+    if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    firebaseDb = firebase.firestore();
+    return firebaseDb;
+  }catch(e){ console.error(e); return null; }
+}
+
+const DAYS = ['lundi','mardi','mercredi','jeudi','vendredi'];
+const DAY_LABELS = { lundi:'Lundi', mardi:'Mardi', mercredi:'Mercredi', jeudi:'Jeudi', vendredi:'Vendredi' };
+const HOURS = [7,8,9,10,11,12,13,14,15,16,17]; // start hour of each 1h tranche, 7h → 18h
+const STATUTS = ['a_faire','en_cours','termine'];
+const STATUT_LABELS = { a_faire:'À faire', en_cours:'En cours', termine:'Terminé' };
+
+function pad(n){ return String(n).padStart(2,'0'); }
+function isoDate(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+function frDate(d){ return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear(); }
+function fmtDateDisplay(s){
+  if(!s) return s;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if(m) return m[3] + '/' + m[2] + '/' + m[1];
+  return s; // already formatted or free text — leave untouched
+}
+function getMonday(date){
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0,0,0,0);
+  return d;
+}
+function addDays(date, n){ const d = new Date(date); d.setDate(d.getDate() + n); return d; }
+function escapeHtml(s){
+  return (s || '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+let currentMonday = getMonday(new Date());
+let fichesCache = [];
+let tasksCache = [];
+let typesCache = [];
+let personnesCache = [];
+let draggedTaskId = null;
+
+function weekDates(){ return DAYS.map((_, i) => addDays(currentMonday, i)); }
+
+// ---- tabs ----
+function switchTab(tab){
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('view-' + tab).classList.add('active');
+  document.getElementById('tabBtn' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+  document.getElementById('weekNav').style.visibility = (tab === 'planning') ? 'visible' : 'hidden';
+}
+
+// ---- week navigation ----
+function updateWeekLabel(){
+  const dates = weekDates();
+  document.getElementById('weekLabel').textContent = 'Semaine du ' + frDate(dates[0]) + ' au ' + frDate(dates[4]);
+}
+async function changeWeek(delta){
+  currentMonday = addDays(currentMonday, delta * 7);
+  updateWeekLabel();
+  subscribeTasksForWeek();
+  renderDossiers();
+}
+function goToday(){
+  currentMonday = getMonday(new Date());
+  updateWeekLabel();
+  subscribeTasksForWeek();
+  renderDossiers();
+}
+
+// ---- data loading ----
+const ENVELOPPE_COLLECTION = "fiches_enveloppe";
+
+let fichesStandardCache = [];
+let fichesEnveloppeCache = [];
+let unsubscribeFichesStandard = null;
+let unsubscribeFichesEnveloppe = null;
+
+function mapFicheDoc(doc, type){
+  const d = doc.data();
+  return {
+    id: doc.id,
+    reference: d.reference || doc.id,
+    client: d.nomClient || '(sans nom)',
+    depot: fmtDateDisplay(d.dateDepotReelle || d.depotSouhaite || d.depotSouhaiteLibre || ''),
+    type,
+    raw: d
+  };
+}
+
+function refreshFichesCacheAndRender(){
+  fichesCache = fichesStandardCache.concat(fichesEnveloppeCache);
+  fichesCache.sort((a,b) => {
+    if(a.type !== b.type) return a.type === 'standard' ? -1 : 1;
+    return b.reference.localeCompare(a.reference, undefined, {numeric:true});
+  });
+  populateDossierSelect();
+  document.getElementById('cloudStatusLabel').textContent = 'Cloud : connecté (' + fichesCache.length + ' dossier(s))';
+  renderDossiers();
+}
+
+// ---- export / import the whole planning (tasks + types + personnes) ----
+async function exportPlanningJSON(){
+  const db = getFirebaseDb();
+  if(!db){ alert("❌ Impossible de se connecter à Firebase."); return; }
+  try{
+    const [tasksSnap, typesSnap, personnesSnap] = await Promise.all([
+      db.collection(TASKS_COLLECTION).get(),
+      db.collection(TYPES_COLLECTION).get(),
+      db.collection(PERSONNES_COLLECTION).get()
+    ]);
+    const payload = {
+      _exportedAt: new Date().toISOString(),
+      taches: tasksSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      types: typesSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      personnes: personnesSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `planning_sauvegarde_${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){
+    console.error('Erreur export planning:', e);
+    alert("❌ Erreur : " + e.message);
+  }
+}
+
+function triggerImportPlanningJSON(){
+  document.getElementById('importPlanningInput').click();
+}
+
+async function handleImportPlanningJSONFile(evt){
+  const file = evt.target.files[0];
+  evt.target.value = '';
+  if(!file) return;
+  const db = getFirebaseDb();
+  if(!db){ alert("❌ Impossible de se connecter à Firebase."); return; }
+
+  let payload;
+  try{
+    const text = await file.text();
+    payload = JSON.parse(text);
+  }catch(e){
+    alert("❌ Fichier JSON invalide : " + e.message);
+    return;
+  }
+
+  const taches = Array.isArray(payload.taches) ? payload.taches : [];
+  const types = Array.isArray(payload.types) ? payload.types : [];
+  const personnes = Array.isArray(payload.personnes) ? payload.personnes : [];
+  const total = taches.length + types.length + personnes.length;
+  if(total === 0){ alert("⚠️ Ce fichier ne contient aucune donnée de planning reconnaissable."); return; }
+
+  const proceed = confirm(
+    "📥 Importer " + taches.length + " tâche(s), " + types.length + " type(s) et " + personnes.length +
+    " personne(s) ?\n\nLes entrées existantes portant le même identifiant seront écrasées."
+  );
+  if(!proceed) return;
+
+  let ok = 0, ko = 0;
+  async function importAll(items, collection){
+    for(const item of items){
+      const { id, ...data } = item;
+      try{
+        if(id){
+          await db.collection(collection).doc(id).set(data);
+        } else {
+          await db.collection(collection).add(data);
+        }
+        ok++;
+      }catch(e){
+        console.error('Erreur import', collection, item, e);
+        ko++;
+      }
+    }
+  }
+  await importAll(taches, TASKS_COLLECTION);
+  await importAll(types, TYPES_COLLECTION);
+  await importAll(personnes, PERSONNES_COLLECTION);
+
+  alert("📥 Import terminé : " + ok + " réussie(s), " + ko + " en erreur.");
+  await loadTypes();
+  await loadPersonnes();
+  renderTypesList();
+  renderPersonnesList();
+  renderBoard();
+}
+
+function subscribeFichesList(){
+  const db = getFirebaseDb();
+  if(!db) return;
+  if(unsubscribeFichesStandard) unsubscribeFichesStandard();
+  if(unsubscribeFichesEnveloppe) unsubscribeFichesEnveloppe();
+
+  unsubscribeFichesStandard = db.collection(FICHES_COLLECTION).onSnapshot(snap => {
+    fichesStandardCache = [];
+    snap.forEach(doc => fichesStandardCache.push(mapFicheDoc(doc, 'standard')));
+    refreshFichesCacheAndRender();
+  }, e => console.error('Erreur écoute fiches standard en direct:', e));
+
+  unsubscribeFichesEnveloppe = db.collection(ENVELOPPE_COLLECTION).onSnapshot(snap => {
+    fichesEnveloppeCache = [];
+    snap.forEach(doc => fichesEnveloppeCache.push(mapFicheDoc(doc, 'enveloppe')));
+    refreshFichesCacheAndRender();
+  }, e => console.warn('Collection enveloppe indisponible:', e.message));
+}
+
+let unsubscribeTasks = null;
+
+function subscribeTasksForWeek(){
+  const db = getFirebaseDb();
+  if(!db) return;
+  if(unsubscribeTasks){ unsubscribeTasks(); unsubscribeTasks = null; }
+
+  const weekId = isoDate(currentMonday);
+  unsubscribeTasks = db.collection(TASKS_COLLECTION).where('semaine', '==', weekId)
+    .onSnapshot(snapshot => {
+      tasksCache = [];
+      snapshot.forEach(doc => tasksCache.push({ id: doc.id, ...doc.data() }));
+      renderBoard();
+      renderDossiers();
+    }, e => {
+      console.error('Erreur écoute tâches en direct:', e);
+    });
+}
+
+async function loadTypes(){
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    const snap = await db.collection(TYPES_COLLECTION).get();
+    typesCache = [];
+    snap.forEach(doc => typesCache.push({ id: doc.id, ...doc.data() }));
+    typesCache.sort((a,b) => (a.nom||'').localeCompare(b.nom||''));
+  }catch(e){ console.error('Erreur chargement types:', e); }
+}
+
+async function loadPersonnes(){
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    const snap = await db.collection(PERSONNES_COLLECTION).get();
+    personnesCache = [];
+    snap.forEach(doc => personnesCache.push({ id: doc.id, ...doc.data() }));
+    personnesCache.sort((a,b) => (a.nom||'').localeCompare(b.nom||''));
+  }catch(e){ console.error('Erreur chargement personnes:', e); }
+}
+
+function findType(id){ return typesCache.find(t => t.id === id); }
+function findPerson(id){ return personnesCache.find(p => p.id === id); }
+
+// ---- dossier select (task modal) ----
+function populateDossierSelect(){
+  const sel = document.getElementById('taskDossier');
+  const typeFilterEl = document.getElementById('taskDossierTypeFilter');
+  const typeFilter = typeFilterEl ? typeFilterEl.value : '';
+  const searchEl = document.getElementById('taskDossierSearch');
+  const search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const previousValue = sel.value;
+  sel.innerHTML = '<option value="">— Aucun dossier lié —</option>';
+  for(const f of fichesCache){
+    if(typeFilter && f.type !== typeFilter) continue;
+    if(search && !f.reference.toLowerCase().includes(search) && !f.client.toLowerCase().includes(search)) continue;
+    const opt = document.createElement('option');
+    opt.value = f.reference;
+    opt.textContent = (f.type === 'enveloppe' ? '📦 ' : '📄 ') + f.reference + ' — ' + f.client;
+    sel.appendChild(opt);
+  }
+  const libreOpt = document.createElement('option');
+  libreOpt.value = '__libre__';
+  libreOpt.textContent = '✏️ Autre référence (saisie libre)…';
+  sel.appendChild(libreOpt);
+  // keep the previous choice selected if it's still in the (possibly filtered) list
+  if(previousValue && Array.from(sel.options).some(o => o.value === previousValue)){
+    sel.value = previousValue;
+  }
+}
+function toggleDossierLibre(){
+  const isLibre = document.getElementById('taskDossier').value === '__libre__';
+  document.getElementById('taskDossierLibre').style.display = isLibre ? 'block' : 'none';
+}
+
+function updateDossierRecap(){
+  const recap = document.getElementById('taskDossierRecap');
+  const selectValue = document.getElementById('taskDossier').value;
+  if(!selectValue || selectValue === '__libre__'){
+    recap.style.display = 'none';
+    recap.innerHTML = '';
+    return;
+  }
+  const f = fichesCache.find(x => x.reference === selectValue);
+  if(!f){
+    recap.style.display = 'none';
+    recap.innerHTML = '';
+    return;
+  }
+  const d = f.raw || {};
+  const typeLabel = f.type === 'enveloppe' ? '📦 Enveloppe' : '📄 Standard';
+  const line = (label, value) => value ? ('<div><b>' + escapeHtml(label) + ' :</b> ' + escapeHtml(value) + '</div>') : '';
+  let html = '<div class="recap-title">🎫 ' + escapeHtml(f.reference) + ' — ' + escapeHtml(f.client) + ' (' + typeLabel + ')</div>';
+  html += line('Référence client', d.referenceClient);
+  html += line('Campagne n°', d.campagneNo);
+  html += line('Dépôt souhaité', fmtDateDisplay(d.depotSouhaite || d.depotSouhaiteLibre));
+  html += line('Date de dépôt réelle', fmtDateDisplay(d.dateDepotReelle));
+  html += line('Versions', d.version);
+  html += line('Quantité totale', d.qteTotale);
+  html += line('Poids estimé', d.poidsEstime);
+  html += line('Poids réel', d.poidsReel);
+  html += line('Nombre de docs', d.nbDocs);
+  recap.innerHTML = html;
+  recap.style.display = 'block';
+}
+
+function populateTypeSelect(){
+  const sel = document.getElementById('taskType');
+  sel.innerHTML = '<option value="">— Choisir un type —</option>';
+  for(const t of typesCache){
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = '● ' + t.nom;
+    opt.style.color = t.couleur;
+    opt.className = 'opt-swatch';
+    sel.appendChild(opt);
+  }
+  const libreOpt = document.createElement('option');
+  libreOpt.value = '__libre__';
+  libreOpt.textContent = '✏️ Autre (saisie libre)…';
+  sel.appendChild(libreOpt);
+}
+function toggleTaskTypeLibre(){
+  const isLibre = document.getElementById('taskType').value === '__libre__';
+  document.getElementById('taskTypeLibre').style.display = isLibre ? 'block' : 'none';
+}
+let selectedPersonIds = [];
+let taskUrgent = false;
+
+function populatePersonChips(preSelectedIds){
+  selectedPersonIds = (preSelectedIds || []).slice();
+  const wrap = document.getElementById('taskAssignedToChips');
+  wrap.innerHTML = '';
+  if(personnesCache.length === 0){
+    wrap.innerHTML = '<span style="font-size:11.5px; color:var(--ink-soft); font-style:italic;">Aucune personne — ajoutez-en dans l\u2019onglet « Personnes ».</span>';
+    return;
+  }
+  for(const p of personnesCache){
+    const chip = document.createElement('label');
+    chip.className = 'chip-option' + (selectedPersonIds.includes(p.id) ? ' selected' : '');
+    if(selectedPersonIds.includes(p.id)) chip.style.background = p.couleur;
+    chip.innerHTML = '<span class="dot" style="background:' + (selectedPersonIds.includes(p.id) ? '#fff' : p.couleur) + ';"></span>' + escapeHtml(p.nom);
+    chip.dataset.personId = p.id;
+    chip.onclick = (e) => {
+      e.preventDefault();
+      const idx = selectedPersonIds.indexOf(p.id);
+      if(idx === -1) selectedPersonIds.push(p.id); else selectedPersonIds.splice(idx, 1);
+      populatePersonChips(selectedPersonIds);
+    };
+    wrap.appendChild(chip);
+  }
+}
+
+function toggleUrgent(){
+  taskUrgent = !taskUrgent;
+  const btn = document.getElementById('taskUrgentBtn');
+  btn.classList.toggle('is-urgent', taskUrgent);
+  btn.textContent = taskUrgent ? '🚨 Urgent — cliquer pour retirer' : '🚨 Marquer comme urgent';
+}
+
+function toggleOccurrencesField(){
+  const recurrence = document.getElementById('taskRecurrence').value;
+  document.getElementById('taskOccurrencesWrap').style.display = (recurrence === 'aucune') ? 'none' : 'block';
+}
+
+function populateHeureSelect(){
+  const sel = document.getElementById('taskHeure');
+  sel.innerHTML = '';
+  HOURS.forEach(h => {
+    const opt = document.createElement('option');
+    opt.value = h;
+    opt.textContent = pad(h) + 'h';
+    sel.appendChild(opt);
+  });
+
+  const finSel = document.getElementById('taskHeureFin');
+  finSel.innerHTML = '';
+  // end hour can be any hour from 8h (1h after the earliest start) up to 18h (end of the grid)
+  for(let h = HOURS[0] + 1; h <= 18; h++){
+    const opt = document.createElement('option');
+    opt.value = h;
+    opt.textContent = pad(h) + 'h';
+    finSel.appendChild(opt);
+  }
+}
+
+function syncHeureFinMin(){
+  const debut = Number(document.getElementById('taskHeure').value);
+  const finSel = document.getElementById('taskHeureFin');
+  if(Number(finSel.value) <= debut){
+    finSel.value = debut + 1;
+  }
+}
+
+// ============================================================================
+// PLANNING BOARD
+// ============================================================================
+function taskBounds(t){
+  const debut = Number(t.heure);
+  const fin = (t.heureFin !== undefined && t.heureFin !== null) ? Number(t.heureFin) : debut + 1;
+  return { debut, fin: Math.max(fin, debut + 1) };
+}
+
+let compactView = false;
+function toggleDensity(){
+  compactView = !compactView;
+  document.getElementById('planningTable').classList.toggle('compact', compactView);
+  document.getElementById('densityBtn').textContent = compactView ? '🔍 Vue normale' : '🔎 Vue compacte';
+}
+
+function populateBoardPersonFilter(){
+  const sel = document.getElementById('boardPersonFilter');
+  if(!sel) return;
+  const previous = sel.value;
+  sel.innerHTML = '<option value="">Toutes les personnes</option>';
+  for(const p of personnesCache){
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.nom;
+    sel.appendChild(opt);
+  }
+  if(previous && Array.from(sel.options).some(o => o.value === previous)){
+    sel.value = previous;
+  }
+}
+function resetBoardFilters(){
+  document.getElementById('boardDayFilter').value = '';
+  document.getElementById('boardPersonFilter').value = '';
+  renderBoard();
+}
+
+function renderBoard(){
+  const table = document.getElementById('planningTable');
+  const dates = weekDates();
+  const today = isoDate(new Date());
+  table.innerHTML = '';
+
+  const dayFilter = (document.getElementById('boardDayFilter') || {}).value || '';
+  const personFilter = (document.getElementById('boardPersonFilter') || {}).value || '';
+  populateBoardPersonFilter();
+  const visibleDays = dayFilter ? DAYS.filter(d => d === dayFilter) : DAYS;
+  const visibleIndexes = visibleDays.map(d => DAYS.indexOf(d));
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  headRow.innerHTML = '<th class="hour-col-head">Horaire</th>';
+  visibleDays.forEach((day, vi) => {
+    const i = visibleIndexes[vi];
+    const dateObj = dates[i];
+    const isToday = isoDate(dateObj) === today;
+    const th = document.createElement('th');
+    th.className = isToday ? 'today-col' : '';
+    th.innerHTML =
+      '<div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">' +
+      '<div><div class="dname">' + DAY_LABELS[day] + '</div><div class="ddate">' + frDate(dateObj) + '</div></div>' +
+      (isToday ? '<div class="postmark">AUJOURD\'<br>HUI</div>' : '') +
+      '</div>';
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  HOURS.forEach(h => {
+    const isBreak = (h === 12);
+    const tr = document.createElement('tr');
+    const hourTd = document.createElement('td');
+    hourTd.className = 'hour-cell' + (isBreak ? ' break-slot' : '');
+    hourTd.textContent = pad(h) + 'h–' + pad(h+1) + 'h';
+    tr.appendChild(hourTd);
+
+    visibleDays.forEach((day, vi) => {
+      const i = visibleIndexes[vi];
+      const isToday = isoDate(dates[i]) === today;
+      const td = document.createElement('td');
+      td.className = 'slot-cell' + (isToday ? ' today-col' : '') + (isBreak ? ' break-slot' : '');
+      td.dataset.day = day;
+      td.dataset.hour = h;
+
+      const matchesPerson = (t) => {
+        if(!personFilter) return true;
+        const personIds = Array.isArray(t.personneIds) ? t.personneIds : (t.personneId ? [t.personneId] : []);
+        return personIds.includes(personFilter);
+      };
+
+      // Tasks starting exactly at this hour → full card.
+      const startingTasks = tasksCache.filter(t => t.jour === day && taskBounds(t).debut === h && matchesPerson(t))
+        .sort((a,b) => (a.reference||'').localeCompare(b.reference||'', undefined, {numeric:true}));
+      for(const t of startingTasks){
+        td.appendChild(buildTaskCard(t));
+      }
+
+      // Tasks that started earlier and are still running through this hour →
+      // thin colored line(s) instead of repeating the whole card.
+      const continuingTasks = tasksCache.filter(t => {
+        if(t.jour !== day || !matchesPerson(t)) return false;
+        const { debut, fin } = taskBounds(t);
+        return h > debut && h < fin;
+      });
+      if(continuingTasks.length){
+        const bars = document.createElement('div');
+        bars.className = 'continuation-bars';
+        for(const t of continuingTasks){
+          const type = findType(t.typeTacheId);
+          const item = document.createElement('div');
+          item.className = 'continuation-item';
+          item.title = (type ? type.nom : (t.titreLibre || 'Tâche')) + ' — en cours';
+          item.addEventListener('click', (e) => { e.stopPropagation(); openTaskModal(t); });
+
+          const bar = document.createElement('div');
+          bar.className = 'continuation-bar';
+          bar.style.background = type ? type.couleur : '#8a8f98';
+          item.appendChild(bar);
+
+          if(t.reference){
+            const refLabel = document.createElement('span');
+            refLabel.className = 'continuation-ref';
+            refLabel.textContent = t.reference;
+            item.appendChild(refLabel);
+          }
+
+          bars.appendChild(item);
+        }
+        td.appendChild(bars);
+      }
+
+      td.addEventListener('click', (e) => { if(e.target === td) openTaskModal(null, day, h); });
+      td.addEventListener('dragover', (e) => { e.preventDefault(); td.classList.add('drag-over'); });
+      td.addEventListener('dragleave', () => td.classList.remove('drag-over'));
+      td.addEventListener('drop', (e) => {
+        e.preventDefault();
+        td.classList.remove('drag-over');
+        if(draggedTaskId) moveTaskToSlot(draggedTaskId, day, h);
+      });
+
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  updateStats();
+  renderPersonSidebar();
+}
+
+let personSidebarInitialized = false;
+function renderPersonSidebar(){
+  const sel = document.getElementById('personSidebarDay');
+  const personSel = document.getElementById('personSidebarPerson');
+  if(!sel || !personSel) return;
+  if(!personSidebarInitialized){
+    const jsDay = new Date().getDay();
+    const idx = (jsDay >= 1 && jsDay <= 5) ? jsDay - 1 : 0;
+    sel.value = DAYS[idx];
+    personSidebarInitialized = true;
+  }
+
+  // Keep the person dropdown in sync with the personnes catalog, preserving
+  // the current selection when it's still valid.
+  const previousPerson = personSel.value;
+  personSel.innerHTML = '<option value="">Toutes les personnes</option>';
+  for(const p of personnesCache){
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.nom;
+    personSel.appendChild(opt);
+  }
+  if(previousPerson && Array.from(personSel.options).some(o => o.value === previousPerson)){
+    personSel.value = previousPerson;
+  }
+
+  document.getElementById('personSidebarBody').innerHTML = buildPersonSummaryHtml(sel.value, personSel.value);
+}
+
+function buildTaskCard(t){
+  const { debut, fin } = taskBounds(t);
+  const type = findType(t.typeTacheId);
+  const personIds = Array.isArray(t.personneIds) ? t.personneIds : (t.personneId ? [t.personneId] : []);
+  const people = personIds.map(id => findPerson(id)).filter(Boolean);
+  const typeColor = type ? type.couleur : '#8a8f98';
+  const typeName = type ? type.nom : (t.titreLibre || t.titre || '(type non défini)');
+  const isUrgent = !!t.urgent;
+  const isMultiHour = (fin - debut) > 1;
+
+  const card = document.createElement('div');
+  card.className = 'task-card st-' + (t.statut || 'a_faire') + (isUrgent ? ' is-urgent' : '');
+  card.style.borderLeftColor = typeColor;
+  card.draggable = true;
+  card.dataset.taskId = t.id;
+
+  card.addEventListener('dragstart', (e) => {
+    draggedTaskId = t.id;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragend', () => { card.classList.remove('dragging'); draggedTaskId = null; });
+  card.addEventListener('click', (e) => { e.stopPropagation(); openTaskModal(t); });
+
+  const dotsHtml = STATUTS.map(s => {
+    const activeClass = t.statut === s ? ('active-' + s.replace('_','')) : '';
+    return '<button type="button" class="status-dot ' + activeClass + '" title="' + STATUT_LABELS[s] + '" data-status="' + s + '"></button>';
+  }).join('');
+
+  const peopleHtml = people.length
+    ? '<span style="display:flex; gap:3px; flex-wrap:wrap;">' +
+      people.map(p => '<span class="person-chip" style="background:' + p.couleur + ';">' + escapeHtml(p.nom) + '</span>').join('') +
+      '</span>'
+    : '<span></span>';
+
+  const noteHtml = (t.description && t.description.trim())
+    ? '<span class="note-icon">📝<span class="note-tooltip">' + escapeHtml(t.description) + '</span></span>'
+    : '';
+  const recurHtml = t.recurrenceGroupId
+    ? '<span class="recur-flag" title="' + escapeHtml(t.recurrenceLabel || 'Tâche récurrente') + '">🔁</span>'
+    : '';
+  const durationHtml = isMultiHour
+    ? '<span class="recur-flag" title="Durée">⏱ ' + pad(debut) + 'h–' + pad(fin) + 'h</span>'
+    : '';
+
+  card.innerHTML =
+    '<div class="type-row">' + (isUrgent ? '<span class="urgent-flag" title="Urgent">🚨</span>' : '') +
+    '<span class="type-dot" style="background:' + typeColor + ';"></span>' +
+    '<span class="type-name' + (t.statut === 'termine' ? ' done' : '') + '" title="' + escapeHtml(typeName) + '">' + escapeHtml(typeName) + '</span>' + noteHtml + recurHtml + durationHtml + '</div>' +
+    (t.reference ? '<div class="ref">' + escapeHtml(t.reference) + '</div>' : '') +
+    '<div class="meta">' + peopleHtml +
+    '<span class="status-dots">' + dotsHtml + '</span>' +
+    '</div>';
+
+  card.querySelectorAll('.status-dot').forEach(dot => {
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      quickSetStatus(t.id, dot.dataset.status);
+    });
+  });
+
+  return card;
+}
+
+async function quickSetStatus(taskId, statut){
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    await db.collection(TASKS_COLLECTION).doc(taskId).update({ statut, updatedAt: new Date().toISOString() });
+    const t = tasksCache.find(x => x.id === taskId);
+    if(t) t.statut = statut;
+    renderBoard();
+    renderDossiers();
+  }catch(e){
+    console.error('Erreur changement statut:', e);
+  }
+}
+
+async function moveTaskToSlot(taskId, day, hour){
+  const db = getFirebaseDb();
+  if(!db) return;
+  const t = tasksCache.find(x => x.id === taskId);
+  if(!t || (t.jour === day && Number(t.heure) === hour)) return;
+  const oldDebut = Number(t.heure);
+  const oldFin = (t.heureFin !== undefined && t.heureFin !== null) ? Number(t.heureFin) : oldDebut + 1;
+  const duration = oldFin - oldDebut;
+  const newFin = Math.min(18, hour + duration); // never spill past the end of the grid
+  try{
+    await db.collection(TASKS_COLLECTION).doc(taskId).update({ jour: day, heure: hour, heureFin: newFin, updatedAt: new Date().toISOString() });
+    t.jour = day; t.heure = hour; t.heureFin = newFin;
+    renderBoard();
+  }catch(e){
+    console.error('Erreur déplacement tâche:', e);
+  }
+}
+
+function updateStats(){
+  const total = tasksCache.length;
+  const aFaire = tasksCache.filter(t => t.statut === 'a_faire' || !t.statut).length;
+  const enCours = tasksCache.filter(t => t.statut === 'en_cours').length;
+  const termine = tasksCache.filter(t => t.statut === 'termine').length;
+  const urgent = tasksCache.filter(t => t.urgent && t.statut !== 'termine').length;
+
+  const dates = weekDates();
+  const now = new Date(); now.setHours(0,0,0,0);
+  let retard = 0;
+  tasksCache.forEach(t => {
+    if(t.statut === 'termine') return;
+    const dayIdx = DAYS.indexOf(t.jour);
+    if(dayIdx === -1) return;
+    if(dates[dayIdx] < now) retard++;
+  });
+
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statAFaire').textContent = aFaire;
+  document.getElementById('statEnCours').textContent = enCours;
+  document.getElementById('statTermine').textContent = termine;
+  document.getElementById('statRetard').textContent = retard;
+  document.getElementById('statUrgent').textContent = urgent;
+}
+
+function openDossierModal(reference){
+  const f = fichesCache.find(x => x.reference === reference);
+  if(!f) return;
+  const d = f.raw || {};
+  const typeLabel = f.type === 'enveloppe' ? '📦 Enveloppe' : '📄 Standard';
+  document.getElementById('dossierModalTitle').textContent = '🎫 ' + f.reference + ' — ' + f.client + ' (' + typeLabel + ')';
+  document.getElementById('dossierRefHint').textContent = f.reference;
+
+  const line = (label, value) => value ? ('<div><b>' + escapeHtml(label) + ' :</b> ' + escapeHtml(value) + '</div>') : '';
+  const relatedTasks = tasksCache.filter(t => t.reference === f.reference);
+
+  let html = '';
+  html += line('Référence client', d.referenceClient);
+  html += line('Campagne n°', d.campagneNo);
+  html += line('Dépôt souhaité', fmtDateDisplay(d.depotSouhaite || d.depotSouhaiteLibre));
+  html += line('Date de dépôt réelle', fmtDateDisplay(d.dateDepotReelle));
+  html += line('Versions', d.version);
+  html += line('Quantité totale', d.qteTotale);
+  html += line('Poids estimé', d.poidsEstime);
+  html += line('Poids réel', d.poidsReel);
+  html += line('Nombre de docs', d.nbDocs);
+  if(d.commentaireLibre) html += '<div style="margin-top:8px;"><b>Commentaire :</b><br>' + escapeHtml(d.commentaireLibre) + '</div>';
+  html += '<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--line);"><b>Tâches planning liées :</b> ' +
+    (relatedTasks.length ? relatedTasks.length + ' (' + relatedTasks.filter(t=>t.statut==='termine').length + ' terminée(s))' : 'aucune pour cette semaine') + '</div>';
+
+  document.getElementById('dossierModalBody').innerHTML = html || '<i style="color:#999;">Aucune donnée détaillée disponible.</i>';
+  const targetFile = f.type === 'enveloppe' ? 'fiche_de_travail_enveloppe.html' : 'fiche_de_travail.html';
+  document.getElementById('dossierOpenFicheLink').href = targetFile + '?ref=' + encodeURIComponent(f.reference);
+  document.getElementById('dossierOverlay').classList.add('open');
+}
+function closeDossierModal(){
+  document.getElementById('dossierOverlay').classList.remove('open');
+}
+
+// ---- tasks-by-person summary ----
+function openPersonSummaryModal(){
+  // default to today's weekday if it falls within Mon–Fri, otherwise Monday
+  const jsDay = new Date().getDay(); // 0=dimanche..6=samedi
+  const idx = (jsDay >= 1 && jsDay <= 5) ? jsDay - 1 : 0;
+  document.getElementById('personSummaryDay').value = DAYS[idx];
+  renderPersonSummary();
+  document.getElementById('personSummaryOverlay').classList.add('open');
+}
+function closePersonSummaryModal(){
+  document.getElementById('personSummaryOverlay').classList.remove('open');
+}
+
+function printPersonSummary(){
+  const day = document.getElementById('personSummaryDay').value;
+  const dates = weekDates();
+  const dayIdx = DAYS.indexOf(day);
+  const dateLabel = dayIdx !== -1 ? frDate(dates[dayIdx]) : '';
+  document.getElementById('personSummaryPrintTitle').textContent =
+    '👥 Tâches par personne — ' + DAY_LABELS[day] + (dateLabel ? ' ' + dateLabel : '');
+  window.print();
+}
+
+function buildPersonSummaryHtml(day, personFilter){
+  const dayTasks = tasksCache.filter(t => t.jour === day);
+
+  // group tasks by assigned person; tasks with nobody assigned go in a
+  // dedicated "Non assigné" bucket so nothing gets silently dropped.
+  const groups = new Map(); // personId ('' for unassigned) -> tasks[]
+  for(const t of dayTasks){
+    const personIds = Array.isArray(t.personneIds) ? t.personneIds : (t.personneId ? [t.personneId] : []);
+    if(personIds.length === 0){
+      if(!groups.has('')) groups.set('', []);
+      groups.get('').push(t);
+    } else {
+      for(const pid of personIds){
+        if(!groups.has(pid)) groups.set(pid, []);
+        groups.get(pid).push(t);
+      }
+    }
+  }
+
+  const orderedPeople = personFilter
+    ? personnesCache.filter(p => p.id === personFilter)
+    : personnesCache.slice();
+  let html = '';
+  let anyShown = false;
+  for(const p of orderedPeople){
+    const tasks = (groups.get(p.id) || []).sort((a,b) => Number(a.heure) - Number(b.heure));
+    if(tasks.length === 0) continue; // hide people with no tasks this day
+    html += renderPersonBlock(p.nom, p.couleur, tasks);
+    anyShown = true;
+  }
+  const unassigned = groups.get('') || [];
+  if(!personFilter && unassigned.length){
+    unassigned.sort((a,b) => Number(a.heure) - Number(b.heure));
+    html += renderPersonBlock('Non assigné', '#8a8f98', unassigned);
+    anyShown = true;
+  }
+
+  return anyShown ? html : '<p style="color:#999; font-style:italic;">Aucune tâche assignée ce jour.</p>';
+}
+
+function renderPersonSummary(){
+  const day = document.getElementById('personSummaryDay').value;
+  document.getElementById('personSummaryBody').innerHTML = buildPersonSummaryHtml(day);
+}
+
+function renderPersonBlock(name, color, tasks){
+  let html = '<div class="person-block">' +
+    '<div class="person-block-head"><span class="swatch" style="background:' + color + ';"></span>' +
+    '<span class="pname">' + escapeHtml(name) + '</span>' +
+    '<span class="pcount">' + tasks.length + ' tâche(s)</span></div>';
+
+  if(tasks.length === 0){
+    html += '<div class="person-empty">Aucune tâche prévue ce jour.</div>';
+  } else {
+    for(const t of tasks){
+      const { debut, fin } = taskBounds(t);
+      const type = findType(t.typeTacheId);
+      const typeColor = type ? type.couleur : '#8a8f98';
+      const typeName = type ? type.nom : (t.titreLibre || t.titre || '(type non défini)');
+      const statutLabel = STATUT_LABELS[t.statut] || 'À faire';
+      html += '<div class="person-task-row">' +
+        '<span class="ptime">' + pad(debut) + 'h–' + pad(fin) + 'h</span>' +
+        '<span class="pdot" style="background:' + typeColor + ';"></span>' +
+        '<span class="pname-task">' + (t.urgent ? '🚨 ' : '') + escapeHtml(typeName) + '</span>' +
+        (t.reference ? '<span class="pref">' + escapeHtml(t.reference) + '</span>' : '') +
+        '<span class="badge st-' + (t.statut||'a_faire') + '">' + statutLabel + '</span>' +
+        '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+// ---- tasks-by-type summary (same pattern as tasks-by-person) ----
+function openTypeSummaryModal(){
+  const jsDay = new Date().getDay();
+  const idx = (jsDay >= 1 && jsDay <= 5) ? jsDay - 1 : 0;
+  document.getElementById('typeSummaryDay').value = DAYS[idx];
+  renderTypeSummary();
+  document.getElementById('typeSummaryOverlay').classList.add('open');
+}
+function closeTypeSummaryModal(){
+  document.getElementById('typeSummaryOverlay').classList.remove('open');
+}
+
+function printTypeSummary(){
+  const day = document.getElementById('typeSummaryDay').value;
+  const dates = weekDates();
+  const dayIdx = DAYS.indexOf(day);
+  const dateLabel = dayIdx !== -1 ? frDate(dates[dayIdx]) : '';
+  document.getElementById('typeSummaryPrintTitle').textContent =
+    '🏷️ Tâches par type — ' + DAY_LABELS[day] + (dateLabel ? ' ' + dateLabel : '');
+  window.print();
+}
+
+function renderTypeSummary(){
+  const day = document.getElementById('typeSummaryDay').value;
+  const dayTasks = tasksCache.filter(t => t.jour === day);
+  const body = document.getElementById('typeSummaryBody');
+
+  // group tasks by task type; tasks without a recognized catalog type
+  // (free-entry titreLibre, or an orphaned/removed type) go in "Autre / Sans type".
+  const groups = new Map(); // typeId ('' for other) -> tasks[]
+  for(const t of dayTasks){
+    const key = (t.typeTacheId && findType(t.typeTacheId)) ? t.typeTacheId : '';
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+
+  const orderedTypes = typesCache.slice(); // every catalog type shows up, even with zero tasks
+  let html = '';
+  for(const type of orderedTypes){
+    const tasks = (groups.get(type.id) || []).sort((a,b) => Number(a.heure) - Number(b.heure));
+    html += renderTypeBlock(type.nom, type.couleur, tasks);
+  }
+  const other = groups.get('') || [];
+  if(other.length){
+    other.sort((a,b) => Number(a.heure) - Number(b.heure));
+    html += renderTypeBlock('Autre / Sans type', '#8a8f98', other);
+  }
+
+  body.innerHTML = html || '<p style="color:#999; font-style:italic;">Aucun type de tâche enregistré — ajoutez-en dans l\u2019onglet « Types de tâches ».</p>';
+}
+
+function renderTypeBlock(name, color, tasks){
+  let html = '<div class="person-block">' +
+    '<div class="person-block-head"><span class="swatch" style="background:' + color + ';"></span>' +
+    '<span class="pname">' + escapeHtml(name) + '</span>' +
+    '<span class="pcount">' + tasks.length + ' tâche(s)</span></div>';
+
+  if(tasks.length === 0){
+    html += '<div class="person-empty">Aucune tâche prévue ce jour.</div>';
+  } else {
+    for(const t of tasks){
+      const { debut, fin } = taskBounds(t);
+      const personIds = Array.isArray(t.personneIds) ? t.personneIds : (t.personneId ? [t.personneId] : []);
+      const people = personIds.map(id => findPerson(id)).filter(Boolean);
+      const peopleLabel = people.length ? people.map(p => p.nom).join(', ') : '—';
+      const statutLabel = STATUT_LABELS[t.statut] || 'À faire';
+      html += '<div class="person-task-row">' +
+        '<span class="ptime">' + pad(debut) + 'h–' + pad(fin) + 'h</span>' +
+        '<span class="pname-task">' + (t.urgent ? '🚨 ' : '') + escapeHtml(peopleLabel) + '</span>' +
+        (t.reference ? '<span class="pref">' + escapeHtml(t.reference) + '</span>' : '') +
+        '<span class="badge st-' + (t.statut||'a_faire') + '">' + statutLabel + '</span>' +
+        '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderDossiers(){
+  const q = (document.getElementById('dossierSearch').value || '').toLowerCase();
+  const typeFilter = document.getElementById('dossierTypeFilter').value;
+  const tbody = document.getElementById('dossiersBody');
+  const filtered = fichesCache.filter(f =>
+    (f.reference.toLowerCase().includes(q) || f.client.toLowerCase().includes(q)) &&
+    (!typeFilter || f.type === typeFilter)
+  );
+  if(filtered.length === 0){
+    tbody.innerHTML = '<tr><td colspan="6" style="color:#999; font-style:italic;">Aucun dossier trouvé.</td></tr>';
+    return;
+  }
+  let html = '';
+  for(const f of filtered){
+    const relatedTasks = tasksCache.filter(t => t.reference === f.reference);
+    const done = relatedTasks.filter(t => t.statut === 'termine').length;
+    const pct = relatedTasks.length ? Math.round((done / relatedTasks.length) * 100) : 0;
+    const typeLabel = f.type === 'enveloppe' ? '📦 Enveloppe' : '📄 Standard';
+    html += '<tr class="dossier-row" data-ref="' + escapeHtml(f.reference) + '" style="cursor:pointer;">' +
+      '<td style="font-size:11px; color:var(--ink-soft); white-space:nowrap;">' + typeLabel + '</td>' +
+      '<td class="mono"><b>' + escapeHtml(f.reference) + '</b></td>' +
+      '<td>' + escapeHtml(f.client) + '</td>' +
+      '<td class="mono">' + escapeHtml(f.depot || '—') + '</td>' +
+      '<td>' + relatedTasks.length + ' (' + done + ' terminée(s))</td>' +
+      '<td><div class="progress-bar"><div class="fill" style="width:' + pct + '%;"></div></div></td>' +
+      '</tr>';
+  }
+  tbody.innerHTML = html;
+  tbody.querySelectorAll('.dossier-row').forEach(row => {
+    row.addEventListener('click', () => openDossierModal(row.dataset.ref));
+  });
+}
+
+// ---- task modal ----
+let taskModalMonday = null;
+
+function updateTaskModalWeekLabel(){
+  const label = document.getElementById('taskModalWeekLabel');
+  if(!label || !taskModalMonday) return;
+  const fri = addDays(taskModalMonday, 4);
+  label.textContent = frDate(taskModalMonday) + ' – ' + frDate(fri);
+}
+function shiftTaskModalWeek(delta){
+  taskModalMonday = addDays(taskModalMonday, delta * 7);
+  updateTaskModalWeekLabel();
+}
+
+function openTaskModal(task, presetDay, presetHour){
+  document.getElementById('taskModalMsg').textContent = '';
+  document.getElementById('taskModalMsg').className = 'status-note';
+  document.getElementById('taskDossierTypeFilter').value = '';
+  document.getElementById('taskDossierSearch').value = '';
+  populateDossierSelect();
+  populateHeureSelect();
+  populateTypeSelect();
+  document.getElementById('taskRecurrenceWrap').style.display = task ? 'none' : 'flex';
+  document.getElementById('taskRecurrence').value = 'aucune';
+  document.getElementById('taskOccurrences').value = 8;
+  toggleOccurrencesField();
+  // Track which week this task belongs to independently from the week
+  // currently shown on the board, so it can be moved to another week
+  // via the ◀ ▶ buttons without navigating the whole planning first.
+  taskModalMonday = task && task.semaine ? new Date(task.semaine + 'T00:00:00') : new Date(currentMonday);
+  updateTaskModalWeekLabel();
+  if(task){
+    document.getElementById('taskModalTitle').textContent = 'Modifier la tâche';
+    document.getElementById('taskId').value = task.id;
+    const refMatchesFiche = task.reference && fichesCache.some(f => f.reference === task.reference);
+    if(task.reference && !refMatchesFiche){
+      document.getElementById('taskDossier').value = '__libre__';
+      document.getElementById('taskDossierLibre').value = task.reference;
+    } else {
+      document.getElementById('taskDossier').value = task.reference || '';
+      document.getElementById('taskDossierLibre').value = '';
+    }
+    toggleDossierLibre();
+    updateDossierRecap();
+    if(task.typeTacheId){
+      document.getElementById('taskType').value = task.typeTacheId;
+      document.getElementById('taskTypeLibre').value = '';
+    } else if(task.titreLibre){
+      document.getElementById('taskType').value = '__libre__';
+      document.getElementById('taskTypeLibre').value = task.titreLibre;
+    } else {
+      document.getElementById('taskType').value = '';
+      document.getElementById('taskTypeLibre').value = '';
+    }
+    toggleTaskTypeLibre();
+    document.getElementById('taskDescription').value = task.description || '';
+    document.getElementById('taskJour').value = task.jour || 'lundi';
+    document.getElementById('taskHeure').value = (task.heure !== undefined && task.heure !== null) ? task.heure : HOURS[0];
+    document.getElementById('taskHeureFin').value = (task.heureFin !== undefined && task.heureFin !== null) ? task.heureFin : (Number(document.getElementById('taskHeure').value) + 1);
+    document.getElementById('taskStatut').value = task.statut || 'a_faire';
+    const preSelected = Array.isArray(task.personneIds) ? task.personneIds : (task.personneId ? [task.personneId] : []);
+    populatePersonChips(preSelected);
+    taskUrgent = !!task.urgent;
+    document.getElementById('taskUrgentBtn').classList.toggle('is-urgent', taskUrgent);
+    document.getElementById('taskUrgentBtn').textContent = taskUrgent ? '🚨 Urgent — cliquer pour retirer' : '🚨 Marquer comme urgent';
+    document.getElementById('taskDeleteBtn').style.display = 'inline-block';
+    document.getElementById('taskDuplicateBtn').style.display = 'inline-block';
+    document.getElementById('taskDeleteSeriesBtn').style.display = task.recurrenceGroupId ? 'inline-block' : 'none';
+  } else {
+    document.getElementById('taskModalTitle').textContent = 'Nouvelle tâche';
+    document.getElementById('taskId').value = '';
+    document.getElementById('taskDossier').value = '';
+    document.getElementById('taskDossierLibre').value = '';
+    toggleDossierLibre();
+    updateDossierRecap();
+    document.getElementById('taskType').value = '';
+    document.getElementById('taskTypeLibre').value = '';
+    toggleTaskTypeLibre();
+    document.getElementById('taskDescription').value = '';
+    document.getElementById('taskJour').value = presetDay || 'lundi';
+    document.getElementById('taskHeure').value = (presetHour !== undefined && presetHour !== null) ? presetHour : HOURS[0];
+    document.getElementById('taskHeureFin').value = Number(document.getElementById('taskHeure').value) + 1;
+    document.getElementById('taskStatut').value = 'a_faire';
+    populatePersonChips([]);
+    taskUrgent = false;
+    document.getElementById('taskUrgentBtn').classList.remove('is-urgent');
+    document.getElementById('taskUrgentBtn').textContent = '🚨 Marquer comme urgent';
+    document.getElementById('taskDeleteBtn').style.display = 'none';
+    document.getElementById('taskDuplicateBtn').style.display = 'none';
+    document.getElementById('taskDeleteSeriesBtn').style.display = 'none';
+  }
+  document.getElementById('taskOverlay').classList.add('open');
+}
+function closeTaskModal(){ document.getElementById('taskOverlay').classList.remove('open'); }
+
+async function saveTask(){
+  const db = getFirebaseDb();
+  const msgEl = document.getElementById('taskModalMsg');
+  if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
+
+  const typeSelectValue = document.getElementById('taskType').value;
+  let typeTacheId = '';
+  let titreLibre = '';
+  if(typeSelectValue === '__libre__'){
+    titreLibre = document.getElementById('taskTypeLibre').value.trim();
+    if(!titreLibre){ msgEl.textContent = '⚠️ Écrivez le nom de la tâche dans le champ de saisie libre.'; msgEl.className = 'status-note err'; return; }
+  } else if(typeSelectValue){
+    typeTacheId = typeSelectValue;
+  } else {
+    msgEl.textContent = '⚠️ Choisissez un type de tâche, ou « Autre (saisie libre) » si elle n\u2019est pas dans la liste.';
+    msgEl.className = 'status-note err';
+    return;
+  }
+
+  const dossierSelectValue = document.getElementById('taskDossier').value;
+  const dossierRef = (dossierSelectValue === '__libre__')
+    ? document.getElementById('taskDossierLibre').value.trim()
+    : dossierSelectValue;
+  const dossierMatch = fichesCache.find(f => f.reference === dossierRef);
+
+  const heureDebut = Number(document.getElementById('taskHeure').value);
+  const heureFin = Number(document.getElementById('taskHeureFin').value);
+  if(heureFin <= heureDebut){
+    msgEl.textContent = '⚠️ L\u2019heure de fin doit être après l\u2019heure de début.';
+    msgEl.className = 'status-note err';
+    return;
+  }
+
+  const payload = {
+    reference: dossierRef || '',
+    client: dossierMatch ? dossierMatch.client : '',
+    typeTacheId: typeTacheId,
+    titreLibre: titreLibre,
+    description: document.getElementById('taskDescription').value.trim(),
+    jour: document.getElementById('taskJour').value,
+    heure: heureDebut,
+    heureFin: heureFin,
+    statut: document.getElementById('taskStatut').value,
+    personneIds: selectedPersonIds.slice(),
+    urgent: taskUrgent,
+    semaine: isoDate(taskModalMonday || currentMonday),
+    updatedAt: new Date().toISOString()
+  };
+
+  const taskId = document.getElementById('taskId').value;
+  const recurrence = taskId ? 'aucune' : document.getElementById('taskRecurrence').value;
+  const occurrences = Math.min(52, Math.max(2, Number(document.getElementById('taskOccurrences').value) || 8));
+  const intervalWeeks = { hebdomadaire:1, toutes_2_semaines:2, mensuelle:4 }[recurrence] || 0;
+
+  try{
+    if(taskId){
+      await db.collection(TASKS_COLLECTION).doc(taskId).update(payload);
+    } else if(intervalWeeks > 0){
+      const recurrenceGroupId = 'rec_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      const batch = db.batch();
+      for(let i = 0; i < occurrences; i++){
+        const occMonday = addDays(taskModalMonday || currentMonday, i * intervalWeeks * 7);
+        const docRef = db.collection(TASKS_COLLECTION).doc();
+        batch.set(docRef, {
+          ...payload,
+          semaine: isoDate(occMonday),
+          recurrenceGroupId,
+          recurrenceLabel: { hebdomadaire:'Hebdomadaire', toutes_2_semaines:'Toutes les 2 semaines', mensuelle:'Mensuelle' }[recurrence],
+          createdAt: payload.updatedAt
+        });
+      }
+      await batch.commit();
+      msgEl.textContent = '';
+    } else {
+      payload.createdAt = payload.updatedAt;
+      await db.collection(TASKS_COLLECTION).add(payload);
+    }
+    closeTaskModal();
+    // If the task was saved under a different week than the one currently
+    // shown, jump the board there so the move is immediately visible instead
+    // of the task seeming to vanish from the current view.
+    if(taskModalMonday && isoDate(taskModalMonday) !== isoDate(currentMonday)){
+      currentMonday = new Date(taskModalMonday);
+      updateWeekLabel();
+      subscribeTasksForWeek();
+      renderDossiers();
+    }
+    // No manual reload needed otherwise: the live Firestore listener
+    // (subscribeTasksForWeek) picks up the change automatically and re-renders,
+    // on this PC and any other.
+  }catch(e){
+    console.error('Erreur enregistrement tâche:', e);
+    msgEl.textContent = '❌ Erreur : ' + e.message;
+    msgEl.className = 'status-note err';
+  }
+}
+
+async function duplicateTask(){
+  const db = getFirebaseDb();
+  const msgEl = document.getElementById('taskModalMsg');
+  if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
+
+  const typeSelectValue = document.getElementById('taskType').value;
+  let typeTacheId = '', titreLibre = '';
+  if(typeSelectValue === '__libre__'){
+    titreLibre = document.getElementById('taskTypeLibre').value.trim();
+  } else if(typeSelectValue){
+    typeTacheId = typeSelectValue;
+  }
+
+  const dossierSelectValue = document.getElementById('taskDossier').value;
+  const dossierRef = (dossierSelectValue === '__libre__')
+    ? document.getElementById('taskDossierLibre').value.trim()
+    : dossierSelectValue;
+  const dossierMatch = fichesCache.find(f => f.reference === dossierRef);
+
+  const heureDebut = Number(document.getElementById('taskHeure').value);
+  const heureFin = Number(document.getElementById('taskHeureFin').value);
+
+  const payload = {
+    reference: dossierRef || '',
+    client: dossierMatch ? dossierMatch.client : '',
+    typeTacheId, titreLibre,
+    description: document.getElementById('taskDescription').value.trim(),
+    jour: document.getElementById('taskJour').value,
+    heure: heureDebut,
+    heureFin: heureFin > heureDebut ? heureFin : heureDebut + 1,
+    statut: 'a_faire', // a duplicate starts fresh rather than inheriting "Terminé"
+    personneIds: selectedPersonIds.slice(),
+    urgent: taskUrgent,
+    semaine: isoDate(taskModalMonday || currentMonday),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  try{
+    await db.collection(TASKS_COLLECTION).add(payload);
+    closeTaskModal();
+  }catch(e){
+    console.error('Erreur duplication tâche:', e);
+    msgEl.textContent = '❌ Erreur : ' + e.message;
+    msgEl.className = 'status-note err';
+  }
+}
+
+async function deleteTask(){
+  const taskId = document.getElementById('taskId').value;
+  if(!taskId) return;
+  if(!confirm('Supprimer définitivement cette tâche ?')) return;
+  const db = getFirebaseDb();
+  try{
+    await db.collection(TASKS_COLLECTION).doc(taskId).delete();
+    closeTaskModal();
+  }catch(e){
+    console.error('Erreur suppression tâche:', e);
+    document.getElementById('taskModalMsg').textContent = '❌ Erreur : ' + e.message;
+    document.getElementById('taskModalMsg').className = 'status-note err';
+  }
+}
+
+async function deleteTaskSeries(){
+  const taskId = document.getElementById('taskId').value;
+  const t = tasksCache.find(x => x.id === taskId);
+  const groupId = t && t.recurrenceGroupId;
+  if(!groupId) return;
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    const snap = await db.collection(TASKS_COLLECTION).where('recurrenceGroupId', '==', groupId).get();
+    const count = snap.size;
+    const proceed = confirm(
+      'Supprimer définitivement les ' + count + ' occurrence(s) de cette tâche récurrente' +
+      (t.recurrenceLabel ? ' (' + t.recurrenceLabel + ')' : '') +
+      ' — y compris celles des semaines passées et futures ?'
+    );
+    if(!proceed) return;
+    const batch = db.batch();
+    snap.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+    closeTaskModal();
+  }catch(e){
+    console.error('Erreur suppression série:', e);
+    document.getElementById('taskModalMsg').textContent = '❌ Erreur : ' + e.message;
+    document.getElementById('taskModalMsg').className = 'status-note err';
+  }
+}
+
+// ============================================================================
+// CATALOG: TYPES DE TÂCHES
+// ============================================================================
+function buildColorPresets(containerId, inputId){
+  const wrap = document.getElementById(containerId);
+  wrap.innerHTML = '';
+  COLOR_PRESETS.forEach(c => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.background = c;
+    b.onclick = () => { document.getElementById(inputId).value = c; };
+    wrap.appendChild(b);
+  });
+}
+
+function renderTypesList(){
+  const list = document.getElementById('typesList');
+  if(typesCache.length === 0){
+    list.innerHTML = '<div class="catalog-row" style="color:#999; font-style:italic;">Aucun type pour l’instant — ajoutez-en un à gauche.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for(const t of typesCache){
+    const row = document.createElement('div');
+    row.className = 'catalog-row';
+    row.innerHTML =
+      '<span class="swatch" style="background:' + t.couleur + ';"></span>' +
+      '<span class="name">' + escapeHtml(t.nom) + '</span>' +
+      '<button type="button" class="ghost small" data-action="edit">Modifier</button>' +
+      '<button type="button" class="accent small" data-action="delete">Supprimer</button>';
+    row.querySelector('[data-action="edit"]').onclick = () => editType(t);
+    row.querySelector('[data-action="delete"]').onclick = () => deleteType(t.id, t.nom);
+    list.appendChild(row);
+  }
+}
+
+function editType(t){
+  document.getElementById('typeFormTitle').textContent = 'Modifier le type';
+  document.getElementById('typeId').value = t.id;
+  document.getElementById('typeNom').value = t.nom;
+  document.getElementById('typeCouleur').value = t.couleur;
+  document.getElementById('typeCancelBtn').style.display = 'inline-block';
+}
+function resetTypeForm(){
+  document.getElementById('typeFormTitle').textContent = 'Ajouter un type';
+  document.getElementById('typeId').value = '';
+  document.getElementById('typeNom').value = '';
+  document.getElementById('typeCouleur').value = '#3d6fa8';
+  document.getElementById('typeCancelBtn').style.display = 'none';
+  document.getElementById('typeFormMsg').textContent = '';
+}
+
+async function saveType(){
+  const db = getFirebaseDb();
+  const msgEl = document.getElementById('typeFormMsg');
+  if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
+  const nom = document.getElementById('typeNom').value.trim();
+  if(!nom){ msgEl.textContent = '⚠️ Le nom est obligatoire.'; msgEl.className = 'status-note err'; return; }
+  const couleur = document.getElementById('typeCouleur').value;
+  const id = document.getElementById('typeId').value;
+  try{
+    if(id){
+      await db.collection(TYPES_COLLECTION).doc(id).update({ nom, couleur });
+    } else {
+      await db.collection(TYPES_COLLECTION).add({ nom, couleur, createdAt: new Date().toISOString() });
+    }
+    resetTypeForm();
+    await loadTypes();
+    renderTypesList();
+    renderBoard();
+  }catch(e){
+    console.error(e);
+    msgEl.textContent = '❌ Erreur : ' + e.message;
+    msgEl.className = 'status-note err';
+  }
+}
+
+async function deleteType(id, nom){
+  if(!confirm('Supprimer le type « ' + nom + ' » ? Les tâches existantes qui l’utilisent garderont juste un type introuvable.')) return;
+  const db = getFirebaseDb();
+  try{
+    await db.collection(TYPES_COLLECTION).doc(id).delete();
+    await loadTypes();
+    renderTypesList();
+    renderBoard();
+  }catch(e){ console.error(e); }
+}
+
+// ============================================================================
+// CATALOG: PERSONNES
+// ============================================================================
+function renderPersonnesList(){
+  const list = document.getElementById('personnesList');
+  if(personnesCache.length === 0){
+    list.innerHTML = '<div class="catalog-row" style="color:#999; font-style:italic;">Aucune personne pour l’instant — ajoutez-en une à gauche.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for(const p of personnesCache){
+    const row = document.createElement('div');
+    row.className = 'catalog-row';
+    row.innerHTML =
+      '<span class="swatch" style="background:' + p.couleur + ';"></span>' +
+      '<span class="name">' + escapeHtml(p.nom) + '</span>' +
+      '<button type="button" class="ghost small" data-action="edit">Modifier</button>' +
+      '<button type="button" class="accent small" data-action="delete">Supprimer</button>';
+    row.querySelector('[data-action="edit"]').onclick = () => editPerson(p);
+    row.querySelector('[data-action="delete"]').onclick = () => deletePerson(p.id, p.nom);
+    list.appendChild(row);
+  }
+}
+
+function editPerson(p){
+  document.getElementById('personFormTitle').textContent = 'Modifier la personne';
+  document.getElementById('personId').value = p.id;
+  document.getElementById('personNom').value = p.nom;
+  document.getElementById('personCouleur').value = p.couleur;
+  document.getElementById('personCancelBtn').style.display = 'inline-block';
+}
+function resetPersonForm(){
+  document.getElementById('personFormTitle').textContent = 'Ajouter une personne';
+  document.getElementById('personId').value = '';
+  document.getElementById('personNom').value = '';
+  document.getElementById('personCouleur').value = '#3f7d3f';
+  document.getElementById('personCancelBtn').style.display = 'none';
+  document.getElementById('personFormMsg').textContent = '';
+}
+
+async function savePerson(){
+  const db = getFirebaseDb();
+  const msgEl = document.getElementById('personFormMsg');
+  if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
+  const nom = document.getElementById('personNom').value.trim();
+  if(!nom){ msgEl.textContent = '⚠️ Le nom est obligatoire.'; msgEl.className = 'status-note err'; return; }
+  const couleur = document.getElementById('personCouleur').value;
+  const id = document.getElementById('personId').value;
+  try{
+    if(id){
+      await db.collection(PERSONNES_COLLECTION).doc(id).update({ nom, couleur });
+    } else {
+      await db.collection(PERSONNES_COLLECTION).add({ nom, couleur, createdAt: new Date().toISOString() });
+    }
+    resetPersonForm();
+    await loadPersonnes();
+    renderPersonnesList();
+    renderBoard();
+  }catch(e){
+    console.error(e);
+    msgEl.textContent = '❌ Erreur : ' + e.message;
+    msgEl.className = 'status-note err';
+  }
+}
+
+async function deletePerson(id, nom){
+  if(!confirm('Supprimer « ' + nom + ' » ? Les tâches existantes qui lui sont assignées resteront simplement sans personne reconnue.')) return;
+  const db = getFirebaseDb();
+  try{
+    await db.collection(PERSONNES_COLLECTION).doc(id).delete();
+    await loadPersonnes();
+    renderPersonnesList();
+    renderBoard();
+  }catch(e){ console.error(e); }
+}
+
+// ============================================================================
+// INIT
+// ============================================================================
+async function appInit(){
+  updateWeekLabel();
+  buildColorPresets('typeColorPresets', 'typeCouleur');
+  buildColorPresets('personColorPresets', 'personCouleur');
+
+  if(!isFirebaseConfigured()){
+    document.getElementById('cloudStatusLabel').textContent = 'Cloud : non configuré';
+    document.getElementById('dossiersBody').innerHTML =
+      '<tr><td colspan="6" style="color:#c0392b;">⚠️ Firebase non configuré (voir FIREBASE_CONFIG dans le code).</td></tr>';
+    renderBoard();
+    return;
+  }
+  subscribeFichesList();
+  await Promise.all([loadTypes(), loadPersonnes()]);
+  subscribeTasksForWeek();
+  renderBoard();
+  renderDossiers();
+  renderTypesList();
+  renderPersonnesList();
+}
+
+// ---- authentication gate ----
+function doSignIn(){
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const msgEl = document.getElementById('authMsg');
+  msgEl.textContent = '';
+  if(!email || !password){ msgEl.textContent = 'Entrez un email et un mot de passe.'; return; }
+  if(!isFirebaseConfigured()){ msgEl.textContent = 'Firebase non configuré.'; return; }
+  firebase.auth().signInWithEmailAndPassword(email, password).catch(e => {
+    console.error('Erreur connexion:', e);
+    msgEl.textContent = 'Connexion refusée : email ou mot de passe incorrect.';
+  });
+}
+function doSignOut(){
+  firebase.auth().signOut();
+}
+(function initAuth(){
+  let appStarted = false;
+  if(!isFirebaseConfigured()){
+    document.getElementById('authOverlay').style.display = 'none';
+    appInit();
+    return;
+  }
+  getFirebaseDb(); // ensures firebase.initializeApp() has run
+  firebase.auth().onAuthStateChanged(user => {
+    if(user){
+      document.getElementById('authOverlay').style.display = 'none';
+      document.getElementById('authUserLabel').textContent = user.email || '';
+      if(!appStarted){ appStarted = true; appInit(); }
+    } else {
+      document.getElementById('authOverlay').style.display = 'flex';
+    }
+  });
+  document.getElementById('authPassword').addEventListener('keydown', (e) => { if(e.key === 'Enter') doSignIn(); });
+})();
+</script>
+
+</body>
+</html>
