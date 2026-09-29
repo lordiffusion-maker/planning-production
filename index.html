@@ -300,6 +300,15 @@
   }
   .note-icon:hover .note-tooltip{ display:block; }
 
+  .note-icon.note-alert{ font-size:13px; animation: note-blink 1s infinite; }
+  @keyframes note-blink{
+    0%, 100% { opacity:1; transform:scale(1); }
+    50% { opacity:0.35; transform:scale(1.25); }
+  }
+  @media print{
+    .note-icon.note-alert{ animation:none; opacity:1; transform:none; }
+  }
+
   .print-only{ display:none; }
 
   @media print{
@@ -1314,7 +1323,7 @@ function buildTaskCard(t){
     : '<span></span>';
 
   const noteHtml = (t.description && t.description.trim())
-    ? '<span class="note-icon">📝<span class="note-tooltip">' + escapeHtml(t.description) + '</span></span>'
+    ? '<span class="note-icon note-alert" title="⚠️ Commentaire sur cette tâche">⚠️<span class="note-tooltip">' + escapeHtml(t.description) + '</span></span>'
     : '';
   const recurHtml = t.recurrenceGroupId
     ? '<span class="recur-flag" title="' + escapeHtml(t.recurrenceLabel || 'Tâche récurrente') + '">🔁</span>'
