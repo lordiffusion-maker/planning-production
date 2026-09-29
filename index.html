@@ -1162,7 +1162,7 @@ function taskBounds(t){
   return { debut, fin: Math.max(fin, debut + 1) };
 }
 
-let compactView = false;
+let compactView = true;
 function toggleDensity(){
   compactView = !compactView;
   document.getElementById('planningTable').classList.toggle('compact', compactView);
@@ -2257,6 +2257,8 @@ async function appInit(){
   updateWeekLabel();
   buildColorPresets('typeColorPresets', 'typeCouleur');
   buildColorPresets('personColorPresets', 'personCouleur');
+  document.getElementById('planningTable').classList.toggle('compact', compactView);
+  document.getElementById('densityBtn').textContent = compactView ? '🔍 Vue normale' : '🔎 Vue compacte';
 
   if(!isFirebaseConfigured()){
     document.getElementById('cloudStatusLabel').textContent = 'Cloud : non configuré';
