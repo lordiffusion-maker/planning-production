@@ -200,6 +200,16 @@
   .catalog-row:last-child{ border-bottom:none; }
   .swatch{ width:16px; height:16px; border-radius:50%; flex:none; border:1px solid rgba(0,0,0,0.1); }
   .catalog-row .name{ flex:1; font-size:13px; }
+
+  .approv-row{ align-items:flex-start; }
+  .approv-row input[type="checkbox"]{ width:18px; height:18px; flex:none; margin-top:2px; cursor:pointer; }
+  .approv-row .approv-info{ flex:1; min-width:0; }
+  .approv-row .approv-libelle{ font-size:13.5px; font-weight:600; }
+  .approv-row .approv-meta{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .approv-row.is-done .approv-libelle{ text-decoration:line-through; color:var(--ink-soft); font-weight:normal; }
+  .approv-row.is-done .approv-meta{ text-decoration:line-through; }
+  .approv-row.is-urgent .approv-libelle::before{ content:'🚨 '; }
+  #approvUrgentBtn.is-urgent{ background:var(--accent); color:#fff; border-color:var(--accent); }
   .field{ margin-bottom:12px; }
   .field label{ display:block; font-size:11.5px; font-weight:bold; color:var(--ink-soft); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.3px; }
   .field input, .field select, .field textarea{
@@ -357,6 +367,7 @@
       <button class="tab-btn active" id="tabBtnPlanning" onclick="switchTab('planning')">📅 Planning</button>
       <button class="tab-btn" id="tabBtnTypes" onclick="switchTab('types')">🏷️ Types de tâches</button>
       <button class="tab-btn" id="tabBtnPersonnes" onclick="switchTab('personnes')">👥 Personnes</button>
+      <button class="tab-btn" id="tabBtnApprov" onclick="switchTab('approv')">📦 Approvisionnements</button>
     </nav>
   </div>
   <div class="week-nav" id="weekNav">
@@ -497,6 +508,36 @@
         <div class="status-note" id="personFormMsg"></div>
       </div>
       <div class="catalog-list" id="personnesList"><div class="catalog-row" style="color:#999; font-style:italic;">Chargement…</div></div>
+    </div>
+  </div>
+
+  <!-- ================= APPROVISIONNEMENTS TAB ================= -->
+  <div class="view" id="view-approv">
+    <div class="section-title"><span class="accent-dot"></span> Approvisionnements à faire</div>
+    <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Liste partagée en direct entre tous les postes — cochez un article une fois la commande passée / reçue.</p>
+
+    <div class="catalog-wrap">
+      <div class="catalog-form">
+        <h3>Ajouter un article</h3>
+        <div class="field"><label>Article / besoin</label><input type="text" id="approvLibelle" placeholder="Ex. Enveloppes kraft 220x310" onkeydown="if(event.key==='Enter'){event.preventDefault(); addApprovItem();}"></div>
+        <div style="display:flex; gap:10px;">
+          <div class="field" style="flex:1;"><label>Quantité</label><input type="text" id="approvQuantite" placeholder="Ex. 5000"></div>
+          <div class="field" style="flex:1;"><label>Fournisseur</label><input type="text" id="approvFournisseur" placeholder="Ex. Antalis"></div>
+        </div>
+        <div class="field">
+          <button type="button" id="approvUrgentBtn" class="ghost" onclick="toggleApprovUrgentInput()">🚨 Marquer comme urgent</button>
+        </div>
+        <button onclick="addApprovItem()">+ Ajouter à la liste</button>
+        <div class="status-note" id="approvFormMsg"></div>
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft); cursor:pointer;">
+            <input type="checkbox" id="approvShowDone" onchange="renderApprovList()"> Afficher les articles reçus/traités
+          </label>
+        </div>
+        <div class="catalog-list" id="approvList"><div class="catalog-row" style="color:#999; font-style:italic;">Chargement…</div></div>
+      </div>
     </div>
   </div>
 
@@ -691,6 +732,7 @@ const FICHES_COLLECTION = "fiches_travail";
 const TASKS_COLLECTION = "planning_taches";
 const TYPES_COLLECTION = "planning_types_taches";
 const PERSONNES_COLLECTION = "planning_personnes";
+const APPROV_COLLECTION = "planning_approvisionnements";
 
 const COLOR_PRESETS = ['#c0392b','#e07b39','#e0b039','#3f7d3f','#2f9e8f','#3d6fa8','#6a5acd','#a24a86','#555555'];
 
@@ -741,6 +783,8 @@ let fichesCache = [];
 let tasksCache = [];
 let typesCache = [];
 let personnesCache = [];
+let approvCache = [];
+let approvUrgentInput = false;
 let draggedTaskId = null;
 
 function weekDates(){ return DAYS.map((_, i) => addDays(currentMonday, i)); }
@@ -2097,6 +2141,116 @@ async function deletePerson(id, nom){
 }
 
 // ============================================================================
+// APPROVISIONNEMENTS (to-do list partagée)
+// ============================================================================
+let unsubscribeApprov = null;
+
+function subscribeApprov(){
+  const db = getFirebaseDb();
+  if(!db) return;
+  if(unsubscribeApprov){ unsubscribeApprov(); unsubscribeApprov = null; }
+  unsubscribeApprov = db.collection(APPROV_COLLECTION).onSnapshot(snap => {
+    approvCache = [];
+    snap.forEach(doc => approvCache.push({ id: doc.id, ...doc.data() }));
+    approvCache.sort((a,b) => {
+      if(!!a.fait !== !!b.fait) return a.fait ? 1 : -1;
+      if(!!a.urgent !== !!b.urgent) return a.urgent ? -1 : 1;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+    renderApprovList();
+  }, e => console.error('Erreur écoute approvisionnements:', e));
+}
+
+function toggleApprovUrgentInput(){
+  approvUrgentInput = !approvUrgentInput;
+  const btn = document.getElementById('approvUrgentBtn');
+  btn.classList.toggle('is-urgent', approvUrgentInput);
+  btn.textContent = approvUrgentInput ? '🚨 Urgent — cliquer pour retirer' : '🚨 Marquer comme urgent';
+}
+
+async function addApprovItem(){
+  const db = getFirebaseDb();
+  const msgEl = document.getElementById('approvFormMsg');
+  if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
+  const libelle = document.getElementById('approvLibelle').value.trim();
+  if(!libelle){ msgEl.textContent = '⚠️ L’article est obligatoire.'; msgEl.className = 'status-note err'; return; }
+  const quantite = document.getElementById('approvQuantite').value.trim();
+  const fournisseur = document.getElementById('approvFournisseur').value.trim();
+  try{
+    await db.collection(APPROV_COLLECTION).add({
+      libelle, quantite, fournisseur,
+      urgent: approvUrgentInput,
+      fait: false,
+      createdAt: new Date().toISOString()
+    });
+    document.getElementById('approvLibelle').value = '';
+    document.getElementById('approvQuantite').value = '';
+    document.getElementById('approvFournisseur').value = '';
+    approvUrgentInput = false;
+    const btn = document.getElementById('approvUrgentBtn');
+    btn.classList.remove('is-urgent');
+    btn.textContent = '🚨 Marquer comme urgent';
+    msgEl.textContent = '✅ Ajouté à la liste.';
+    msgEl.className = 'status-note';
+    document.getElementById('approvLibelle').focus();
+  }catch(e){
+    console.error(e);
+    msgEl.textContent = '❌ Erreur : ' + e.message;
+    msgEl.className = 'status-note err';
+  }
+}
+
+async function toggleApprovDone(id, current){
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    await db.collection(APPROV_COLLECTION).doc(id).update({
+      fait: !current,
+      doneAt: !current ? new Date().toISOString() : null
+    });
+  }catch(e){ console.error(e); }
+}
+
+async function deleteApprovItem(id, libelle){
+  if(!confirm('Supprimer « ' + libelle + ' » de la liste ?')) return;
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{ await db.collection(APPROV_COLLECTION).doc(id).delete(); }
+  catch(e){ console.error(e); }
+}
+
+function renderApprovList(){
+  const list = document.getElementById('approvList');
+  if(!list) return;
+  const showDone = document.getElementById('approvShowDone').checked;
+  const items = approvCache.filter(a => showDone || !a.fait);
+  if(items.length === 0){
+    list.innerHTML = '<div class="catalog-row" style="color:#999; font-style:italic;">' +
+      (approvCache.length === 0 ? 'Rien à approvisionner pour l’instant.' : 'Tout est traité ✅ (cochez « Afficher les articles reçus/traités » pour les revoir).') +
+      '</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for(const a of items){
+    const row = document.createElement('div');
+    row.className = 'catalog-row approv-row' + (a.fait ? ' is-done' : '') + (a.urgent && !a.fait ? ' is-urgent' : '');
+    const metaParts = [];
+    if(a.quantite) metaParts.push('Qté : ' + escapeHtml(a.quantite));
+    if(a.fournisseur) metaParts.push('Fournisseur : ' + escapeHtml(a.fournisseur));
+    row.innerHTML =
+      '<input type="checkbox" ' + (a.fait ? 'checked' : '') + ' title="' + (a.fait ? 'Marquer comme non traité' : 'Marquer comme reçu / traité') + '">' +
+      '<div class="approv-info">' +
+        '<div class="approv-libelle">' + escapeHtml(a.libelle) + '</div>' +
+        (metaParts.length ? '<div class="approv-meta">' + metaParts.join(' · ') + '</div>' : '') +
+      '</div>' +
+      '<button type="button" class="accent small" data-action="delete">Supprimer</button>';
+    row.querySelector('input[type="checkbox"]').onchange = () => toggleApprovDone(a.id, !!a.fait);
+    row.querySelector('[data-action="delete"]').onclick = () => deleteApprovItem(a.id, a.libelle);
+    list.appendChild(row);
+  }
+}
+
+// ============================================================================
 // INIT
 // ============================================================================
 async function appInit(){
@@ -2114,6 +2268,7 @@ async function appInit(){
   subscribeFichesList();
   await Promise.all([loadTypes(), loadPersonnes()]);
   subscribeTasksForWeek();
+  subscribeApprov();
   renderBoard();
   renderDossiers();
   renderTypesList();
