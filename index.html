@@ -301,6 +301,7 @@
   .note-icon:hover .note-tooltip{ display:block; }
 
   .note-icon.note-alert{ font-size:13px; animation: note-blink 1s infinite; }
+  .note-icon.note-alert:hover{ animation-play-state:paused; opacity:1; transform:none; }
   @keyframes note-blink{
     0%, 100% { opacity:1; transform:scale(1); }
     50% { opacity:0.35; transform:scale(1.25); }
