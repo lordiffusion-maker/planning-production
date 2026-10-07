@@ -465,23 +465,6 @@
       <div class="board-wrap" id="boardWrap" style="flex:1; min-width:0;">
         <table class="planning" id="planningTable"></table>
       </div>
-
-      <div class="person-sidebar" id="personSidebar">
-        <div class="person-sidebar-head">
-          <h3>👥 Par personne</h3>
-          <select id="personSidebarDay" onchange="renderPersonSidebar()">
-            <option value="lundi">Lundi</option>
-            <option value="mardi">Mardi</option>
-            <option value="mercredi">Mercredi</option>
-            <option value="jeudi">Jeudi</option>
-            <option value="vendredi">Vendredi</option>
-          </select>
-        </div>
-        <select id="personSidebarPerson" onchange="renderPersonSidebar()" style="width:100%; margin-bottom:10px; font-size:11px; padding:4px 6px; border:1px solid var(--line); border-radius:4px;">
-          <option value="">Toutes les personnes</option>
-        </select>
-        <div id="personSidebarBody"></div>
-      </div>
     </div>
 
     <div class="stats" style="grid-template-columns:repeat(6, 1fr); margin-top:8px;">
@@ -1398,36 +1381,6 @@ function renderBoard(){
   });
   table.appendChild(tbody);
   updateStats();
-  renderPersonSidebar();
-}
-
-let personSidebarInitialized = false;
-function renderPersonSidebar(){
-  const sel = document.getElementById('personSidebarDay');
-  const personSel = document.getElementById('personSidebarPerson');
-  if(!sel || !personSel) return;
-  if(!personSidebarInitialized){
-    const jsDay = new Date().getDay();
-    const idx = (jsDay >= 1 && jsDay <= 5) ? jsDay - 1 : 0;
-    sel.value = DAYS[idx];
-    personSidebarInitialized = true;
-  }
-
-  // Keep the person dropdown in sync with the personnes catalog, preserving
-  // the current selection when it's still valid.
-  const previousPerson = personSel.value;
-  personSel.innerHTML = '<option value="">Toutes les personnes</option>';
-  for(const p of personnesCache){
-    const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = p.nom;
-    personSel.appendChild(opt);
-  }
-  if(previousPerson && Array.from(personSel.options).some(o => o.value === previousPerson)){
-    personSel.value = previousPerson;
-  }
-
-  document.getElementById('personSidebarBody').innerHTML = buildPersonSummaryHtml(sel.value, personSel.value);
 }
 
 function buildTaskCard(t){
