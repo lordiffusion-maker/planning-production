@@ -402,6 +402,14 @@
       <select id="boardPersonFilter" onchange="renderBoard()">
         <option value="">Toutes les personnes</option>
       </select>
+      <label style="margin-left:10px;">Type :</label>
+      <select id="boardTypeFilter" onchange="renderBoard()">
+        <option value="">Tous les types</option>
+      </select>
+      <label style="margin-left:10px;">Dossier :</label>
+      <select id="boardDossierFilter" onchange="renderBoard()">
+        <option value="">Tous les dossiers</option>
+      </select>
       <button type="button" class="ghost small" onclick="resetBoardFilters()" style="margin-left:6px;">✕ Réinitialiser</button>
     </div>
 
@@ -1207,9 +1215,29 @@ function populateBoardPersonFilter(){
     sel.value = previous;
   }
 }
+function populateBoardTypeDossierFilters(){
+  const typeSel = document.getElementById('boardTypeFilter');
+  const dossSel = document.getElementById('boardDossierFilter');
+  if(!typeSel || !dossSel) return;
+  const prevType = typeSel.value, prevDoss = dossSel.value;
+  typeSel.innerHTML = '<option value="">Tous les types</option>';
+  for(const t of typesCache){
+    const o = document.createElement('option'); o.value = t.id; o.textContent = t.nom; typeSel.appendChild(o);
+  }
+  if(prevType && Array.from(typeSel.options).some(o => o.value === prevType)) typeSel.value = prevType;
+  dossSel.innerHTML = '<option value="">Tous les dossiers</option>';
+  const refs = Array.from(new Set(tasksCache.map(t => t.reference).filter(Boolean)))
+    .sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
+  for(const r of refs){
+    const o = document.createElement('option'); o.value = r; o.textContent = refWithClient(r); dossSel.appendChild(o);
+  }
+  if(prevDoss && Array.from(dossSel.options).some(o => o.value === prevDoss)) dossSel.value = prevDoss;
+}
 function resetBoardFilters(){
   document.getElementById('boardDayFilter').value = '';
   document.getElementById('boardPersonFilter').value = '';
+  document.getElementById('boardTypeFilter').value = '';
+  document.getElementById('boardDossierFilter').value = '';
   renderBoard();
 }
 
@@ -1222,6 +1250,9 @@ function renderBoard(){
   const dayFilter = (document.getElementById('boardDayFilter') || {}).value || '';
   const personFilter = (document.getElementById('boardPersonFilter') || {}).value || '';
   populateBoardPersonFilter();
+  populateBoardTypeDossierFilters();
+  const typeFilter = (document.getElementById('boardTypeFilter') || {}).value || '';
+  const dossierFilter = (document.getElementById('boardDossierFilter') || {}).value || '';
   const visibleDays = dayFilter ? DAYS.filter(d => d === dayFilter) : DAYS;
   const visibleIndexes = visibleDays.map(d => DAYS.indexOf(d));
 
@@ -1262,6 +1293,8 @@ function renderBoard(){
       td.dataset.hour = h;
 
       const matchesPerson = (t) => {
+        if(typeFilter && t.typeTacheId !== typeFilter) return false;
+        if(dossierFilter && t.reference !== dossierFilter) return false;
         if(!personFilter) return true;
         const personIds = Array.isArray(t.personneIds) ? t.personneIds : (t.personneId ? [t.personneId] : []);
         return personIds.includes(personFilter);
