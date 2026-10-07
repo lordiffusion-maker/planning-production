@@ -204,6 +204,15 @@
   .extra-task-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; background:#f6f7f9; border:1px solid var(--line); border-radius:6px; padding:6px; margin-bottom:6px; }
   .extra-task-row select, .extra-task-row input[type="text"]{ flex:1; min-width:110px; }
   .extra-task-row .x-time{ flex:none; width:72px; min-width:0; }
+  .info-banner{ display:flex; gap:12px; align-items:flex-start; background:#fff4d6; border:1px solid #e0b039; border-left:6px solid var(--accent); border-radius:6px; padding:10px 14px; margin-bottom:10px; }
+  .info-banner-icon{ font-size:22px; line-height:1; }
+  .info-banner-body{ flex:1; min-width:0; }
+  .info-banner-title{ font-size:11px; font-weight:bold; text-transform:uppercase; letter-spacing:0.4px; color:var(--accent); }
+  .info-banner-text{ font-size:14px; font-weight:600; white-space:pre-wrap; margin-top:2px; }
+  .info-banner-meta{ font-size:10.5px; color:var(--ink-soft); margin-top:3px; }
+  .info-editor{ background:var(--paper); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:10px; }
+  .info-editor textarea{ width:100%; box-sizing:border-box; margin-top:4px; font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:4px; }
+  @media print{ .info-banner-actions, #infoBannerEmpty, #infoEditor{ display:none !important; } }
   .approv-row{ align-items:flex-start; }
   .approv-row input[type="checkbox"]{ width:18px; height:18px; flex:none; margin-top:2px; cursor:pointer; }
   .approv-row .approv-info{ flex:1; min-width:0; }
@@ -387,6 +396,31 @@
 
   <!-- ================= PLANNING TAB ================= -->
   <div class="view active" id="view-planning">
+
+    <div id="infoBanner" class="info-banner" style="display:none;">
+      <span class="info-banner-icon">📢</span>
+      <div class="info-banner-body">
+        <div class="info-banner-title">Information importante</div>
+        <div id="infoBannerText" class="info-banner-text"></div>
+        <div id="infoBannerMeta" class="info-banner-meta"></div>
+      </div>
+      <div class="info-banner-actions">
+        <button type="button" class="ghost small" onclick="openInfoEditor()">✏️ Modifier</button>
+      </div>
+    </div>
+    <div id="infoBannerEmpty" style="margin-bottom:8px;">
+      <button type="button" class="ghost small" onclick="openInfoEditor()">📢 Ajouter une information importante pour l’équipe</button>
+    </div>
+    <div id="infoEditor" class="info-editor" style="display:none;">
+      <label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;">Message affiché à toute l’équipe</label>
+      <textarea id="infoEditorText" rows="3" placeholder="Ex. Ce vendredi : machine d’impression en maintenance, privilégier le numérique."></textarea>
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <button type="button" onclick="saveInfoBanner()">💾 Publier</button>
+        <button type="button" class="ghost" onclick="closeInfoEditor()">Annuler</button>
+        <button type="button" class="accent" id="infoClearBtn" onclick="clearInfoBanner()" style="display:none;">🗑️ Retirer le bandeau</button>
+      </div>
+      <div class="status-note" id="infoEditorMsg"></div>
+    </div>
 
     <div class="board-filters">
       <label>Jour :</label>
@@ -752,6 +786,8 @@ const TASKS_COLLECTION = "planning_taches";
 const TYPES_COLLECTION = "planning_types_taches";
 const PERSONNES_COLLECTION = "planning_personnes";
 const APPROV_COLLECTION = "planning_approvisionnements";
+const INFO_COLLECTION = "planning_bandeau";
+const INFO_DOC_ID = "courant";
 
 const COLOR_PRESETS = ['#c0392b','#e07b39','#e0b039','#3f7d3f','#2f9e8f','#3d6fa8','#6a5acd','#a24a86','#555555'];
 
@@ -2284,6 +2320,88 @@ async function deletePerson(id, nom){
 }
 
 // ============================================================================
+// BANDEAU « INFORMATION IMPORTANTE » (partagé en direct)
+// ============================================================================
+let unsubscribeInfo = null;
+let currentInfo = null;
+
+function subscribeInfoBanner(){
+  const db = getFirebaseDb();
+  if(!db) return;
+  if(unsubscribeInfo){ unsubscribeInfo(); unsubscribeInfo = null; }
+  unsubscribeInfo = db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).onSnapshot(doc => {
+    currentInfo = doc.exists ? doc.data() : null;
+    renderInfoBanner();
+  }, e => console.error('Erreur écoute bandeau:', e));
+}
+
+function renderInfoBanner(){
+  const banner = document.getElementById('infoBanner');
+  const empty = document.getElementById('infoBannerEmpty');
+  if(!banner) return;
+  const text = currentInfo && currentInfo.message ? currentInfo.message.trim() : '';
+  if(text){
+    document.getElementById('infoBannerText').textContent = text;
+    let meta = '';
+    if(currentInfo.updatedAt){
+      const d = new Date(currentInfo.updatedAt);
+      meta = 'Publié le ' + frDate(d) + ' à ' + pad(d.getHours()) + 'h' + pad(d.getMinutes());
+      if(currentInfo.updatedBy) meta += ' par ' + currentInfo.updatedBy;
+    }
+    document.getElementById('infoBannerMeta').textContent = meta;
+    banner.style.display = 'flex';
+    empty.style.display = 'none';
+  } else {
+    banner.style.display = 'none';
+    empty.style.display = document.getElementById('infoEditor').style.display === 'none' ? '' : 'none';
+  }
+}
+
+function openInfoEditor(){
+  document.getElementById('infoEditorText').value = currentInfo && currentInfo.message ? currentInfo.message : '';
+  document.getElementById('infoClearBtn').style.display = (currentInfo && currentInfo.message) ? 'inline-block' : 'none';
+  document.getElementById('infoEditorMsg').textContent = '';
+  document.getElementById('infoEditor').style.display = '';
+  document.getElementById('infoBannerEmpty').style.display = 'none';
+  document.getElementById('infoEditorText').focus();
+}
+function closeInfoEditor(){
+  document.getElementById('infoEditor').style.display = 'none';
+  renderInfoBanner();
+}
+
+async function saveInfoBanner(){
+  const db = getFirebaseDb();
+  const msgEl = document.getElementById('infoEditorMsg');
+  if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
+  const message = document.getElementById('infoEditorText').value.trim();
+  if(!message){ msgEl.textContent = '⚠️ Écrivez un message, ou utilisez « Retirer le bandeau ».'; msgEl.className = 'status-note err'; return; }
+  try{
+    const user = firebase.auth().currentUser;
+    await db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).set({
+      message,
+      updatedAt: new Date().toISOString(),
+      updatedBy: user && user.email ? user.email : ''
+    });
+    closeInfoEditor();
+  }catch(e){
+    console.error(e);
+    msgEl.textContent = '❌ Erreur : ' + e.message;
+    msgEl.className = 'status-note err';
+  }
+}
+
+async function clearInfoBanner(){
+  if(!confirm('Retirer le bandeau pour toute l’équipe ?')) return;
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    await db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).delete();
+    closeInfoEditor();
+  }catch(e){ console.error(e); }
+}
+
+// ============================================================================
 // APPROVISIONNEMENTS (to-do list partagée)
 // ============================================================================
 let unsubscribeApprov = null;
@@ -2414,6 +2532,7 @@ async function appInit(){
   await Promise.all([loadTypes(), loadPersonnes()]);
   subscribeTasksForWeek();
   subscribeApprov();
+  subscribeInfoBanner();
   renderBoard();
   renderDossiers();
   renderTypesList();
