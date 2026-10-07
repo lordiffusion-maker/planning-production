@@ -407,6 +407,7 @@
         <option value="">Tous les types</option>
       </select>
       <label style="margin-left:10px;">Dossier :</label>
+      <input type="search" id="boardDossierSearch" placeholder="Rechercher un dossier…" oninput="renderBoard()" style="width:160px;">
       <select id="boardDossierFilter" onchange="renderBoard()">
         <option value="">Tous les dossiers</option>
       </select>
@@ -1228,7 +1229,9 @@ function populateBoardTypeDossierFilters(){
   dossSel.innerHTML = '<option value="">Tous les dossiers</option>';
   const refs = Array.from(new Set(tasksCache.map(t => t.reference).filter(Boolean)))
     .sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
+  const q = ((document.getElementById('boardDossierSearch') || {}).value || '').trim().toLowerCase();
   for(const r of refs){
+    if(q && !refWithClient(r).toLowerCase().includes(q)) continue;
     const o = document.createElement('option'); o.value = r; o.textContent = refWithClient(r); dossSel.appendChild(o);
   }
   if(prevDoss && Array.from(dossSel.options).some(o => o.value === prevDoss)) dossSel.value = prevDoss;
@@ -1238,6 +1241,7 @@ function resetBoardFilters(){
   document.getElementById('boardPersonFilter').value = '';
   document.getElementById('boardTypeFilter').value = '';
   document.getElementById('boardDossierFilter').value = '';
+  document.getElementById('boardDossierSearch').value = '';
   renderBoard();
 }
 
@@ -1253,6 +1257,7 @@ function renderBoard(){
   populateBoardTypeDossierFilters();
   const typeFilter = (document.getElementById('boardTypeFilter') || {}).value || '';
   const dossierFilter = (document.getElementById('boardDossierFilter') || {}).value || '';
+  const dossierSearch = ((document.getElementById('boardDossierSearch') || {}).value || '').trim().toLowerCase();
   const visibleDays = dayFilter ? DAYS.filter(d => d === dayFilter) : DAYS;
   const visibleIndexes = visibleDays.map(d => DAYS.indexOf(d));
 
@@ -1295,6 +1300,7 @@ function renderBoard(){
       const matchesPerson = (t) => {
         if(typeFilter && t.typeTacheId !== typeFilter) return false;
         if(dossierFilter && t.reference !== dossierFilter) return false;
+        if(dossierSearch && !refWithClient(t.reference || '').toLowerCase().includes(dossierSearch)) return false;
         if(!personFilter) return true;
         const personIds = Array.isArray(t.personneIds) ? t.personneIds : (t.personneId ? [t.personneId] : []);
         return personIds.includes(personFilter);
