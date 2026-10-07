@@ -836,6 +836,18 @@ function mapFicheDoc(doc, type){
   };
 }
 
+function clientForRef(ref){
+  if(!ref) return '';
+  const f = fichesCache.find(x => x.reference === ref);
+  if(!f || !f.client || f.client === '(sans nom)') return '';
+  return f.client;
+}
+function refWithClient(ref){
+  const c = clientForRef(ref);
+  if(!c || ref.toLowerCase().includes(c.toLowerCase())) return ref;
+  return ref + ' — ' + c;
+}
+
 function refreshFichesCacheAndRender(){
   fichesCache = fichesStandardCache.concat(fichesEnveloppeCache);
   fichesCache.sort((a,b) => {
@@ -845,6 +857,7 @@ function refreshFichesCacheAndRender(){
   populateDossierSelect();
   document.getElementById('cloudStatusLabel').textContent = 'Cloud : connecté (' + fichesCache.length + ' dossier(s))';
   renderDossiers();
+  renderBoard();
 }
 
 // ---- export / import the whole planning (tasks + types + personnes) ----
@@ -1276,7 +1289,7 @@ function renderBoard(){
           if(t.reference){
             const refLabel = document.createElement('span');
             refLabel.className = 'continuation-ref';
-            refLabel.textContent = t.reference;
+            refLabel.textContent = refWithClient(t.reference);
             item.appendChild(refLabel);
           }
 
@@ -1381,7 +1394,7 @@ function buildTaskCard(t){
     '<div class="type-row">' + (isUrgent ? '<span class="urgent-flag" title="Urgent">🚨</span>' : '') +
     '<span class="type-dot" style="background:' + typeColor + ';"></span>' +
     '<span class="type-name' + (t.statut === 'termine' ? ' done' : '') + '" title="' + escapeHtml(typeName) + '">' + escapeHtml(typeName) + '</span>' + noteHtml + recurHtml + durationHtml + '</div>' +
-    (t.reference ? '<div class="ref">' + escapeHtml(t.reference) + '</div>' : '') +
+    (t.reference ? '<div class="ref">' + escapeHtml(refWithClient(t.reference)) + '</div>' : '') +
     '<div class="meta">' + peopleHtml +
     '<span class="status-dots">' + dotsHtml + '</span>' +
     '</div>';
@@ -1574,7 +1587,7 @@ function renderPersonBlock(name, color, tasks){
         '<span class="ptime">' + pad(debut) + 'h–' + pad(fin) + 'h</span>' +
         '<span class="pdot" style="background:' + typeColor + ';"></span>' +
         '<span class="pname-task">' + (t.urgent ? '🚨 ' : '') + escapeHtml(typeName) + '</span>' +
-        (t.reference ? '<span class="pref">' + escapeHtml(t.reference) + '</span>' : '') +
+        (t.reference ? '<span class="pref">' + escapeHtml(refWithClient(t.reference)) + '</span>' : '') +
         '<span class="badge st-' + (t.statut||'a_faire') + '">' + statutLabel + '</span>' +
         '</div>';
     }
@@ -1652,7 +1665,7 @@ function renderTypeBlock(name, color, tasks){
       html += '<div class="person-task-row">' +
         '<span class="ptime">' + pad(debut) + 'h–' + pad(fin) + 'h</span>' +
         '<span class="pname-task">' + (t.urgent ? '🚨 ' : '') + escapeHtml(peopleLabel) + '</span>' +
-        (t.reference ? '<span class="pref">' + escapeHtml(t.reference) + '</span>' : '') +
+        (t.reference ? '<span class="pref">' + escapeHtml(refWithClient(t.reference)) + '</span>' : '') +
         '<span class="badge st-' + (t.statut||'a_faire') + '">' + statutLabel + '</span>' +
         '</div>';
     }
