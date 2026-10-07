@@ -208,6 +208,7 @@
   .info-banner-icon{ font-size:22px; line-height:1; }
   .info-banner-body{ flex:1; min-width:0; }
   .info-banner-title{ font-size:11px; font-weight:bold; text-transform:uppercase; letter-spacing:0.4px; color:var(--accent); }
+  .info-banner-fromto{ font-size:12px; margin-top:2px; color:var(--ink); }
   .info-banner-text{ font-size:14px; font-weight:600; white-space:pre-wrap; margin-top:2px; }
   .info-banner-meta{ font-size:10.5px; color:var(--ink-soft); margin-top:3px; }
   .info-editor{ background:var(--paper); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:10px; }
@@ -401,6 +402,7 @@
       <span class="info-banner-icon">📢</span>
       <div class="info-banner-body">
         <div class="info-banner-title">Information importante</div>
+        <div id="infoBannerFromTo" class="info-banner-fromto"></div>
         <div id="infoBannerText" class="info-banner-text"></div>
         <div id="infoBannerMeta" class="info-banner-meta"></div>
       </div>
@@ -413,6 +415,12 @@
     </div>
     <div id="infoEditor" class="info-editor" style="display:none;">
       <label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;">Message affiché à toute l’équipe</label>
+      <div style="display:flex; gap:10px; margin:6px 0 4px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:150px;"><label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase;">De :</label>
+          <select id="infoFrom" style="width:100%;"></select></div>
+        <div style="flex:1; min-width:150px;"><label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase;">À :</label>
+          <select id="infoTo" style="width:100%;"></select></div>
+      </div>
       <textarea id="infoEditorText" rows="3" placeholder="Ex. Ce vendredi : machine d’impression en maintenance, privilégier le numérique."></textarea>
       <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
         <button type="button" onclick="saveInfoBanner()">💾 Publier</button>
@@ -2295,6 +2303,10 @@ function renderInfoBanner(){
   const text = currentInfo && currentInfo.message ? currentInfo.message.trim() : '';
   if(text){
     document.getElementById('infoBannerText').textContent = text;
+    const fromTo = [];
+    if(currentInfo.deNom) fromTo.push('<b>De :</b> ' + escapeHtml(currentInfo.deNom));
+    fromTo.push('<b>À :</b> ' + escapeHtml(currentInfo.aNom || 'Toute l’équipe'));
+    document.getElementById('infoBannerFromTo').innerHTML = fromTo.join(' &nbsp;→&nbsp; ');
     let meta = '';
     if(currentInfo.updatedAt){
       const d = new Date(currentInfo.updatedAt);
@@ -2310,7 +2322,25 @@ function renderInfoBanner(){
   }
 }
 
+function populateInfoFromTo(){
+  const fromSel = document.getElementById('infoFrom');
+  const toSel = document.getElementById('infoTo');
+  fromSel.innerHTML = '<option value="">— (non précisé) —</option>';
+  toSel.innerHTML = '<option value="">👥 Toute l’équipe</option>';
+  for(const p of personnesCache){
+    [fromSel, toSel].forEach(sel => { const o = document.createElement('option'); o.value = p.nom; o.textContent = p.nom; sel.appendChild(o); });
+  }
+  const ensure = (sel, v) => {
+    if(v && !Array.from(sel.options).some(o => o.value === v)){ const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); }
+  };
+  const de = currentInfo && currentInfo.deNom ? currentInfo.deNom : '';
+  const a = currentInfo && currentInfo.aNom && currentInfo.aNom !== 'Toute l’équipe' ? currentInfo.aNom : '';
+  ensure(fromSel, de); ensure(toSel, a);
+  fromSel.value = de; toSel.value = a;
+}
+
 function openInfoEditor(){
+  populateInfoFromTo();
   document.getElementById('infoEditorText').value = currentInfo && currentInfo.message ? currentInfo.message : '';
   document.getElementById('infoClearBtn').style.display = (currentInfo && currentInfo.message) ? 'inline-block' : 'none';
   document.getElementById('infoEditorMsg').textContent = '';
@@ -2333,6 +2363,8 @@ async function saveInfoBanner(){
     const user = firebase.auth().currentUser;
     await db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).set({
       message,
+      deNom: document.getElementById('infoFrom').value,
+      aNom: document.getElementById('infoTo').value || 'Toute l’équipe',
       updatedAt: new Date().toISOString(),
       updatedBy: user && user.email ? user.email : ''
     });
