@@ -201,6 +201,9 @@
   .swatch{ width:16px; height:16px; border-radius:50%; flex:none; border:1px solid rgba(0,0,0,0.1); }
   .catalog-row .name{ flex:1; font-size:13px; }
 
+  .extra-task-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; background:#f6f7f9; border:1px solid var(--line); border-radius:6px; padding:6px; margin-bottom:6px; }
+  .extra-task-row select, .extra-task-row input[type="text"]{ flex:1; min-width:110px; }
+  .extra-task-row .x-time{ flex:none; width:72px; min-width:0; }
   .approv-row{ align-items:flex-start; }
   .approv-row input[type="checkbox"]{ width:18px; height:18px; flex:none; margin-top:2px; cursor:pointer; }
   .approv-row .approv-info{ flex:1; min-width:0; }
@@ -673,6 +676,13 @@
           <option value="termine">Terminé</option>
         </select>
       </div>
+    </div>
+
+    <div id="taskExtraWrap" class="field">
+      <label>Autres tâches pour ce même dossier (création multiple)</label>
+      <div id="taskExtraList"></div>
+      <button type="button" class="ghost small" onclick="addExtraTaskRow()">+ Ajouter une autre tâche</button>
+      <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">Chaque ligne crée une tâche distincte (même dossier, même semaine, même statut/urgence). Jour et horaires reprennent ceux ci-dessus par défaut.</div>
     </div>
 
     <div id="taskRecurrenceWrap" style="display:flex; gap:10px;">
@@ -1721,6 +1731,62 @@ function shiftTaskModalWeek(delta){
   updateTaskModalWeekLabel();
 }
 
+// ---- création multiple : lignes de tâches supplémentaires ----
+function buildExtraOptions(sel, items, placeholder){
+  sel.innerHTML = '<option value="">' + placeholder + '</option>';
+  items.forEach(i => { const o = document.createElement('option'); o.value = i.value; o.textContent = i.label; sel.appendChild(o); });
+}
+function addExtraTaskRow(){
+  const list = document.getElementById('taskExtraList');
+  const row = document.createElement('div');
+  row.className = 'extra-task-row';
+  row.innerHTML =
+    '<select class="x-type"></select>' +
+    '<input type="text" class="x-libre" placeholder="Nom de la tâche…" style="display:none;">' +
+    '<select class="x-person"></select>' +
+    '<select class="x-jour"></select>' +
+    '<select class="x-debut x-time"></select>' +
+    '<select class="x-fin x-time"></select>' +
+    '<button type="button" class="ghost small" title="Retirer">✕</button>';
+  const typeSel = row.querySelector('.x-type');
+  buildExtraOptions(typeSel, typesCache.map(t => ({ value:t.id, label:'● ' + t.nom })).concat([{ value:'__libre__', label:'✏️ Autre (saisie libre)…' }]), '— Type —');
+  typeSel.onchange = () => { row.querySelector('.x-libre').style.display = typeSel.value === '__libre__' ? '' : 'none'; };
+  buildExtraOptions(row.querySelector('.x-person'), personnesCache.map(p => ({ value:p.id, label:p.nom })), '— Personne —');
+  const jourSel = row.querySelector('.x-jour');
+  jourSel.innerHTML = '';
+  DAYS.forEach(d => { const o = document.createElement('option'); o.value = d; o.textContent = DAY_LABELS[d]; jourSel.appendChild(o); });
+  jourSel.value = document.getElementById('taskJour').value;
+  const debSel = row.querySelector('.x-debut'), finSel = row.querySelector('.x-fin');
+  HOURS.forEach(h => { const o = document.createElement('option'); o.value = h; o.textContent = pad(h) + 'h'; debSel.appendChild(o); });
+  for(let h = HOURS[0] + 1; h <= 18; h++){ const o = document.createElement('option'); o.value = h; o.textContent = pad(h) + 'h'; finSel.appendChild(o); }
+  debSel.value = document.getElementById('taskHeure').value;
+  finSel.value = document.getElementById('taskHeureFin').value;
+  debSel.onchange = () => { if(Number(finSel.value) <= Number(debSel.value)) finSel.value = Number(debSel.value) + 1; };
+  row.querySelector('button').onclick = () => row.remove();
+  list.appendChild(row);
+}
+function readExtraTasks(){
+  const out = [];
+  for(const row of document.querySelectorAll('#taskExtraList .extra-task-row')){
+    const typeVal = row.querySelector('.x-type').value;
+    const libre = row.querySelector('.x-libre').value.trim();
+    const personId = row.querySelector('.x-person').value;
+    const debut = Number(row.querySelector('.x-debut').value);
+    const fin = Number(row.querySelector('.x-fin').value);
+    if(!typeVal && !personId) continue; // ligne vide ignorée
+    if(!typeVal || (typeVal === '__libre__' && !libre)) return { error:'⚠️ Une tâche supplémentaire n\u2019a pas de type (ou de nom libre).' };
+    if(fin <= debut) return { error:'⚠️ Une tâche supplémentaire a une heure de fin avant son début.' };
+    out.push({
+      typeTacheId: typeVal === '__libre__' ? '' : typeVal,
+      titreLibre: typeVal === '__libre__' ? libre : '',
+      personneIds: personId ? [personId] : [],
+      jour: row.querySelector('.x-jour').value,
+      heure: debut, heureFin: fin
+    });
+  }
+  return { tasks: out };
+}
+
 function openTaskModal(task, presetDay, presetHour){
   document.getElementById('taskModalMsg').textContent = '';
   document.getElementById('taskModalMsg').className = 'status-note';
@@ -1730,6 +1796,8 @@ function openTaskModal(task, presetDay, presetHour){
   populateHeureSelect();
   populateTypeSelect();
   document.getElementById('taskRecurrenceWrap').style.display = task ? 'none' : 'flex';
+  document.getElementById('taskExtraWrap').style.display = task ? 'none' : '';
+  document.getElementById('taskExtraList').innerHTML = '';
   document.getElementById('taskRecurrence').value = 'aucune';
   document.getElementById('taskOccurrences').value = 8;
   toggleOccurrencesField();
@@ -1852,6 +1920,12 @@ async function saveTask(){
   };
 
   const taskId = document.getElementById('taskId').value;
+  let extraTasks = [];
+  if(!taskId){
+    const extra = readExtraTasks();
+    if(extra.error){ msgEl.textContent = extra.error; msgEl.className = 'status-note err'; return; }
+    extraTasks = extra.tasks;
+  }
   const recurrence = taskId ? 'aucune' : document.getElementById('taskRecurrence').value;
   const occurrences = Math.min(52, Math.max(2, Number(document.getElementById('taskOccurrences').value) || 8));
   const intervalWeeks = { hebdomadaire:1, toutes_2_semaines:2, mensuelle:4 }[recurrence] || 0;
@@ -1873,11 +1947,28 @@ async function saveTask(){
           createdAt: payload.updatedAt
         });
       }
+      for(const [xi, x] of extraTasks.entries()){
+        const xGroupId = recurrenceGroupId + '_x' + xi;
+        for(let i = 0; i < occurrences; i++){
+          batch.set(db.collection(TASKS_COLLECTION).doc(), {
+            ...payload, ...x,
+            semaine: isoDate(addDays(taskModalMonday || currentMonday, i * intervalWeeks * 7)),
+            recurrenceGroupId: xGroupId,
+            recurrenceLabel: { hebdomadaire:'Hebdomadaire', toutes_2_semaines:'Toutes les 2 semaines', mensuelle:'Mensuelle' }[recurrence],
+            createdAt: payload.updatedAt
+          });
+        }
+      }
       await batch.commit();
       msgEl.textContent = '';
     } else {
       payload.createdAt = payload.updatedAt;
-      await db.collection(TASKS_COLLECTION).add(payload);
+      const batch = db.batch();
+      batch.set(db.collection(TASKS_COLLECTION).doc(), payload);
+      for(const x of extraTasks){
+        batch.set(db.collection(TASKS_COLLECTION).doc(), { ...payload, ...x });
+      }
+      await batch.commit();
     }
     closeTaskModal();
     // If the task was saved under a different week than the one currently
