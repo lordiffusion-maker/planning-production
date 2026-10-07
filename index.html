@@ -208,6 +208,9 @@
   .info-banner-icon{ font-size:22px; line-height:1; }
   .info-banner-body{ flex:1; min-width:0; }
   .info-banner-title{ font-size:11px; font-weight:bold; text-transform:uppercase; letter-spacing:0.4px; color:var(--accent); }
+  .info-to-list{ display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .info-to-list label{ display:inline-flex; align-items:center; gap:4px; background:#f6f7f9; border:1px solid var(--line); border-radius:12px; padding:3px 9px; font-size:12px; cursor:pointer; text-transform:none; font-weight:normal; color:var(--ink); }
+  .info-to-list input{ width:auto; margin:0; }
   .info-banner-fromto{ font-size:12px; margin-top:2px; color:var(--ink); }
   .info-banner-text{ font-size:14px; font-weight:600; white-space:pre-wrap; margin-top:2px; }
   .info-banner-meta{ font-size:10.5px; color:var(--ink-soft); margin-top:3px; }
@@ -418,8 +421,8 @@
       <div style="display:flex; gap:10px; margin:6px 0 4px; flex-wrap:wrap;">
         <div style="flex:1; min-width:150px;"><label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase;">De :</label>
           <select id="infoFrom" style="width:100%;"></select></div>
-        <div style="flex:1; min-width:150px;"><label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase;">À :</label>
-          <select id="infoTo" style="width:100%;"></select></div>
+        <div style="flex:1; min-width:150px;"><label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase;">À : (plusieurs possibles)</label>
+          <div id="infoTo" class="info-to-list"></div></div>
       </div>
       <textarea id="infoEditorText" rows="3" placeholder="Ex. Ce vendredi : machine d’impression en maintenance, privilégier le numérique."></textarea>
       <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
@@ -2305,7 +2308,7 @@ function renderInfoBanner(){
     document.getElementById('infoBannerText').textContent = text;
     const fromTo = [];
     if(currentInfo.deNom) fromTo.push('<b>De :</b> ' + escapeHtml(currentInfo.deNom));
-    fromTo.push('<b>À :</b> ' + escapeHtml(currentInfo.aNom || 'Toute l’équipe'));
+    fromTo.push('<b>À :</b> ' + escapeHtml(infoRecipients(currentInfo).join(', ') || 'Toute l’équipe'));
     document.getElementById('infoBannerFromTo').innerHTML = fromTo.join(' &nbsp;→&nbsp; ');
     let meta = '';
     if(currentInfo.updatedAt){
@@ -2322,21 +2325,47 @@ function renderInfoBanner(){
   }
 }
 
+const INFO_TEAM = 'Toute l’équipe';
+function infoRecipients(info){
+  if(!info) return [];
+  if(Array.isArray(info.aNoms)) return info.aNoms;
+  return info.aNom ? [info.aNom] : []; // anciens messages (un seul destinataire)
+}
+
 function populateInfoFromTo(){
   const fromSel = document.getElementById('infoFrom');
-  const toSel = document.getElementById('infoTo');
+  const toBox = document.getElementById('infoTo');
   fromSel.innerHTML = '<option value="">— (non précisé) —</option>';
-  toSel.innerHTML = '<option value="">👥 Toute l’équipe</option>';
   for(const p of personnesCache){
-    [fromSel, toSel].forEach(sel => { const o = document.createElement('option'); o.value = p.nom; o.textContent = p.nom; sel.appendChild(o); });
+    const o = document.createElement('option'); o.value = p.nom; o.textContent = p.nom; fromSel.appendChild(o);
   }
-  const ensure = (sel, v) => {
-    if(v && !Array.from(sel.options).some(o => o.value === v)){ const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); }
-  };
   const de = currentInfo && currentInfo.deNom ? currentInfo.deNom : '';
-  const a = currentInfo && currentInfo.aNom && currentInfo.aNom !== 'Toute l’équipe' ? currentInfo.aNom : '';
-  ensure(fromSel, de); ensure(toSel, a);
-  fromSel.value = de; toSel.value = a;
+  if(de && !Array.from(fromSel.options).some(o => o.value === de)){
+    const o = document.createElement('option'); o.value = de; o.textContent = de; fromSel.appendChild(o);
+  }
+  fromSel.value = de;
+
+  const current = infoRecipients(currentInfo);
+  const teamSelected = current.length === 0 || current.includes(INFO_TEAM);
+  const names = personnesCache.map(p => p.nom);
+  current.forEach(n => { if(n !== INFO_TEAM && !names.includes(n)) names.push(n); });
+  toBox.innerHTML = '';
+  const mk = (value, label, checked) => {
+    const l = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = value; cb.checked = checked;
+    l.appendChild(cb); l.appendChild(document.createTextNode(label));
+    toBox.appendChild(l);
+    return cb;
+  };
+  const teamCb = mk(INFO_TEAM, '👥 ' + INFO_TEAM, teamSelected);
+  const personCbs = names.map(n => mk(n, n, !teamSelected && current.includes(n)));
+  // « Toute l'équipe » et les personnes s'excluent mutuellement
+  teamCb.onchange = () => { if(teamCb.checked) personCbs.forEach(c => c.checked = false); else if(!personCbs.some(c => c.checked)) teamCb.checked = true; };
+  personCbs.forEach(c => c.onchange = () => {
+    if(c.checked) teamCb.checked = false;
+    else if(!personCbs.some(x => x.checked)) teamCb.checked = true;
+  });
 }
 
 function openInfoEditor(){
@@ -2364,7 +2393,10 @@ async function saveInfoBanner(){
     await db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).set({
       message,
       deNom: document.getElementById('infoFrom').value,
-      aNom: document.getElementById('infoTo').value || 'Toute l’équipe',
+      aNoms: (() => {
+        const checked = Array.from(document.querySelectorAll('#infoTo input:checked')).map(c => c.value);
+        return (checked.length === 0 || checked.includes(INFO_TEAM)) ? [INFO_TEAM] : checked;
+      })(),
       updatedAt: new Date().toISOString(),
       updatedBy: user && user.email ? user.email : ''
     });
