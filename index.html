@@ -401,23 +401,12 @@
   <!-- ================= PLANNING TAB ================= -->
   <div class="view active" id="view-planning">
 
-    <div id="infoBanner" class="info-banner" style="display:none;">
-      <span class="info-banner-icon">📢</span>
-      <div class="info-banner-body">
-        <div class="info-banner-title">Information importante</div>
-        <div id="infoBannerFromTo" class="info-banner-fromto"></div>
-        <div id="infoBannerText" class="info-banner-text"></div>
-        <div id="infoBannerMeta" class="info-banner-meta"></div>
-      </div>
-      <div class="info-banner-actions">
-        <button type="button" class="ghost small" onclick="openInfoEditor()">✏️ Modifier</button>
-      </div>
-    </div>
+    <div id="infoBannerList"></div>
     <div id="infoBannerEmpty" style="margin-bottom:8px;">
       <button type="button" class="ghost small" onclick="openInfoEditor()">📢 Ajouter une information importante pour l’équipe</button>
     </div>
     <div id="infoEditor" class="info-editor" style="display:none;">
-      <label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;">Message affiché à toute l’équipe</label>
+      <label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.3px;">Nouveau message / modification</label>
       <div style="display:flex; gap:10px; margin:6px 0 4px; flex-wrap:wrap;">
         <div style="flex:1; min-width:150px;"><label style="font-size:11.5px; font-weight:bold; color:var(--ink-soft); text-transform:uppercase;">De :</label>
           <select id="infoFrom" style="width:100%;"></select></div>
@@ -428,8 +417,7 @@
       <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
         <button type="button" onclick="saveInfoBanner()">💾 Publier</button>
         <button type="button" class="ghost" onclick="closeInfoEditor()">Annuler</button>
-        <button type="button" class="accent" id="infoClearBtn" onclick="clearInfoBanner()" style="display:none;">🗑️ Retirer le bandeau</button>
-      </div>
+              </div>
       <div class="status-note" id="infoEditorMsg"></div>
     </div>
 
@@ -781,7 +769,6 @@ const TYPES_COLLECTION = "planning_types_taches";
 const PERSONNES_COLLECTION = "planning_personnes";
 const APPROV_COLLECTION = "planning_approvisionnements";
 const INFO_COLLECTION = "planning_bandeau";
-const INFO_DOC_ID = "courant";
 
 const COLOR_PRESETS = ['#c0392b','#e07b39','#e0b039','#3f7d3f','#2f9e8f','#3d6fa8','#6a5acd','#a24a86','#555555'];
 
@@ -2287,42 +2274,62 @@ async function deletePerson(id, nom){
 // BANDEAU « INFORMATION IMPORTANTE » (partagé en direct)
 // ============================================================================
 let unsubscribeInfo = null;
-let currentInfo = null;
+let infoMessages = [];     // tous les messages publiés
+let currentInfo = null;    // message en cours d'édition (null = nouveau)
+let editingInfoId = null;
 
 function subscribeInfoBanner(){
   const db = getFirebaseDb();
   if(!db) return;
   if(unsubscribeInfo){ unsubscribeInfo(); unsubscribeInfo = null; }
-  unsubscribeInfo = db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).onSnapshot(doc => {
-    currentInfo = doc.exists ? doc.data() : null;
+  unsubscribeInfo = db.collection(INFO_COLLECTION).onSnapshot(snap => {
+    infoMessages = [];
+    snap.forEach(doc => {
+      const d = doc.data();
+      if(d && d.message && d.message.trim()) infoMessages.push({ id: doc.id, ...d });
+    });
+    infoMessages.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
     renderInfoBanner();
   }, e => console.error('Erreur écoute bandeau:', e));
 }
 
 function renderInfoBanner(){
-  const banner = document.getElementById('infoBanner');
+  const list = document.getElementById('infoBannerList');
   const empty = document.getElementById('infoBannerEmpty');
-  if(!banner) return;
-  const text = currentInfo && currentInfo.message ? currentInfo.message.trim() : '';
-  if(text){
-    document.getElementById('infoBannerText').textContent = text;
+  if(!list) return;
+  list.innerHTML = '';
+  for(const m of infoMessages){
+    const box = document.createElement('div');
+    box.className = 'info-banner';
     const fromTo = [];
-    if(currentInfo.deNom) fromTo.push('<b>De :</b> ' + escapeHtml(currentInfo.deNom));
-    fromTo.push('<b>À :</b> ' + escapeHtml(infoRecipients(currentInfo).join(', ') || 'Toute l’équipe'));
-    document.getElementById('infoBannerFromTo').innerHTML = fromTo.join(' &nbsp;→&nbsp; ');
+    if(m.deNom) fromTo.push('<b>De :</b> ' + escapeHtml(m.deNom));
+    fromTo.push('<b>À :</b> ' + escapeHtml(infoRecipients(m).join(', ') || 'Toute l’équipe'));
     let meta = '';
-    if(currentInfo.updatedAt){
-      const d = new Date(currentInfo.updatedAt);
+    if(m.updatedAt){
+      const d = new Date(m.updatedAt);
       meta = 'Publié le ' + frDate(d) + ' à ' + pad(d.getHours()) + 'h' + pad(d.getMinutes());
-      if(currentInfo.updatedBy) meta += ' par ' + currentInfo.updatedBy;
+      if(m.updatedBy) meta += ' par ' + m.updatedBy;
     }
-    document.getElementById('infoBannerMeta').textContent = meta;
-    banner.style.display = 'flex';
-    empty.style.display = 'none';
-  } else {
-    banner.style.display = 'none';
-    empty.style.display = document.getElementById('infoEditor').style.display === 'none' ? '' : 'none';
+    box.innerHTML =
+      '<span class="info-banner-icon">📢</span>' +
+      '<div class="info-banner-body">' +
+        '<div class="info-banner-title">Information importante</div>' +
+        '<div class="info-banner-fromto">' + fromTo.join(' &nbsp;→&nbsp; ') + '</div>' +
+        '<div class="info-banner-text">' + escapeHtml(m.message) + '</div>' +
+        '<div class="info-banner-meta">' + escapeHtml(meta) + '</div>' +
+      '</div>' +
+      '<div class="info-banner-actions" style="display:flex; gap:6px; flex-direction:column;">' +
+        '<button type="button" class="ghost small" data-action="edit">✏️ Modifier</button>' +
+        '<button type="button" class="accent small" data-action="delete">🗑️ Retirer</button>' +
+      '</div>';
+    box.querySelector('[data-action="edit"]').onclick = () => openInfoEditor(m);
+    box.querySelector('[data-action="delete"]').onclick = () => clearInfoBanner(m.id);
+    list.appendChild(box);
   }
+  empty.style.display = document.getElementById('infoEditor').style.display === 'none' ? '' : 'none';
+  empty.querySelector('button').textContent = infoMessages.length
+    ? '📢 Ajouter un autre message pour l’équipe'
+    : '📢 Ajouter une information importante pour l’équipe';
 }
 
 const INFO_TEAM = 'Toute l’équipe';
@@ -2368,10 +2375,11 @@ function populateInfoFromTo(){
   });
 }
 
-function openInfoEditor(){
+function openInfoEditor(msg){
+  currentInfo = msg || null;
+  editingInfoId = msg ? msg.id : null;
   populateInfoFromTo();
-  document.getElementById('infoEditorText').value = currentInfo && currentInfo.message ? currentInfo.message : '';
-  document.getElementById('infoClearBtn').style.display = (currentInfo && currentInfo.message) ? 'inline-block' : 'none';
+  document.getElementById('infoEditorText').value = msg ? msg.message : '';
   document.getElementById('infoEditorMsg').textContent = '';
   document.getElementById('infoEditor').style.display = '';
   document.getElementById('infoBannerEmpty').style.display = 'none';
@@ -2379,6 +2387,8 @@ function openInfoEditor(){
 }
 function closeInfoEditor(){
   document.getElementById('infoEditor').style.display = 'none';
+  currentInfo = null;
+  editingInfoId = null;
   renderInfoBanner();
 }
 
@@ -2387,19 +2397,22 @@ async function saveInfoBanner(){
   const msgEl = document.getElementById('infoEditorMsg');
   if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
   const message = document.getElementById('infoEditorText').value.trim();
-  if(!message){ msgEl.textContent = '⚠️ Écrivez un message, ou utilisez « Retirer le bandeau ».'; msgEl.className = 'status-note err'; return; }
+  if(!message){ msgEl.textContent = '⚠️ Écrivez un message.'; msgEl.className = 'status-note err'; return; }
   try{
     const user = firebase.auth().currentUser;
-    await db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).set({
+    const checked = Array.from(document.querySelectorAll('#infoTo input:checked')).map(c => c.value);
+    const data = {
       message,
       deNom: document.getElementById('infoFrom').value,
-      aNoms: (() => {
-        const checked = Array.from(document.querySelectorAll('#infoTo input:checked')).map(c => c.value);
-        return (checked.length === 0 || checked.includes(INFO_TEAM)) ? [INFO_TEAM] : checked;
-      })(),
+      aNoms: (checked.length === 0 || checked.includes(INFO_TEAM)) ? [INFO_TEAM] : checked,
       updatedAt: new Date().toISOString(),
       updatedBy: user && user.email ? user.email : ''
-    });
+    };
+    if(editingInfoId){
+      await db.collection(INFO_COLLECTION).doc(editingInfoId).set(data);
+    } else {
+      await db.collection(INFO_COLLECTION).add(data);
+    }
     closeInfoEditor();
   }catch(e){
     console.error(e);
@@ -2408,13 +2421,12 @@ async function saveInfoBanner(){
   }
 }
 
-async function clearInfoBanner(){
-  if(!confirm('Retirer le bandeau pour toute l’équipe ?')) return;
+async function clearInfoBanner(id){
+  if(!confirm('Retirer ce message pour toute l’équipe ?')) return;
   const db = getFirebaseDb();
   if(!db) return;
   try{
-    await db.collection(INFO_COLLECTION).doc(INFO_DOC_ID).delete();
-    closeInfoEditor();
+    await db.collection(INFO_COLLECTION).doc(id).delete();
   }catch(e){ console.error(e); }
 }
 
