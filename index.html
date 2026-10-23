@@ -217,6 +217,17 @@
   .info-editor{ background:var(--paper); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:10px; }
   .info-editor textarea{ width:100%; box-sizing:border-box; margin-top:4px; font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:4px; }
   @media print{ .info-banner-actions, #infoBannerEmpty, #infoEditor{ display:none !important; } }
+  .todo-group{ background:var(--paper); border:1px solid var(--line); border-radius:6px; margin-bottom:12px; overflow:hidden; }
+  .todo-group-head{ display:flex; align-items:center; gap:8px; padding:8px 14px; background:#f6f7f9; border-bottom:1px solid var(--line); font-weight:bold; font-size:13px; }
+  .todo-group-head .count{ margin-left:auto; font-weight:normal; font-size:11.5px; color:var(--ink-soft); }
+  .todo-row{ display:flex; align-items:flex-start; gap:10px; padding:9px 14px; border-bottom:1px solid #eef0f2; }
+  .todo-row:last-child{ border-bottom:none; }
+  .todo-row input[type="checkbox"]{ width:18px; height:18px; flex:none; margin-top:2px; cursor:pointer; }
+  .todo-info{ flex:1; min-width:0; }
+  .todo-libelle{ font-size:13.5px; font-weight:600; }
+  .todo-comment{ font-size:12px; color:var(--ink-soft); margin-top:3px; white-space:pre-wrap; }
+  .todo-row.is-done .todo-libelle{ text-decoration:line-through; color:var(--ink-soft); font-weight:normal; }
+  .todo-row.is-done .todo-comment{ text-decoration:line-through; }
   .approv-row{ align-items:flex-start; }
   .approv-row input[type="checkbox"]{ width:18px; height:18px; flex:none; margin-top:2px; cursor:pointer; }
   .approv-row .approv-info{ flex:1; min-width:0; }
@@ -384,6 +395,7 @@
       <button class="tab-btn" id="tabBtnTypes" onclick="switchTab('types')">🏷️ Types de tâches</button>
       <button class="tab-btn" id="tabBtnPersonnes" onclick="switchTab('personnes')">👥 Personnes</button>
       <button class="tab-btn" id="tabBtnApprov" onclick="switchTab('approv')">📦 Approvisionnements</button>
+      <button class="tab-btn" id="tabBtnTodo" onclick="switchTab('todo')">✅ To-do list</button>
     </nav>
   </div>
   <div class="week-nav" id="weekNav">
@@ -565,6 +577,38 @@
           </label>
         </div>
         <div class="catalog-list" id="approvList"><div class="catalog-row" style="color:#999; font-style:italic;">Chargement…</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TO-DO LIST TAB ================= -->
+  <div class="view" id="view-todo">
+    <div class="section-title"><span class="accent-dot"></span> To-do list</div>
+    <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Tâches à faire, attribuées par personne, avec commentaire. Liste partagée en direct entre tous les postes.</p>
+
+    <div class="catalog-wrap">
+      <div class="catalog-form">
+        <h3 id="todoFormTitle">Ajouter une tâche</h3>
+        <input type="hidden" id="todoId">
+        <div class="field"><label>Tâche</label><input type="text" id="todoLibelle" placeholder="Ex. Appeler le client pour le BAT" onkeydown="if(event.key==='Enter'){event.preventDefault(); saveTodo();}"></div>
+        <div class="field"><label>Attribuée à</label><select id="todoPerson"></select></div>
+        <div class="field"><label>Commentaire</label><textarea id="todoComment" rows="3" placeholder="Précisions, contexte…" style="width:100%; box-sizing:border-box; font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:4px;"></textarea></div>
+        <div style="display:flex; gap:8px;">
+          <button onclick="saveTodo()" id="todoSaveBtn">+ Ajouter</button>
+          <button class="ghost" id="todoCancelBtn" style="display:none;" onclick="resetTodoForm()">Annuler</button>
+        </div>
+        <div class="status-note" id="todoFormMsg"></div>
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
+          <label style="font-size:12.5px; color:var(--ink-soft);">Personne :
+            <select id="todoPersonFilter" onchange="renderTodoList()"></select>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft); cursor:pointer;">
+            <input type="checkbox" id="todoShowDone" onchange="renderTodoList()"> Afficher les tâches terminées
+          </label>
+        </div>
+        <div id="todoList"></div>
       </div>
     </div>
   </div>
@@ -768,6 +812,7 @@ const TASKS_COLLECTION = "planning_taches";
 const TYPES_COLLECTION = "planning_types_taches";
 const PERSONNES_COLLECTION = "planning_personnes";
 const APPROV_COLLECTION = "planning_approvisionnements";
+const TODO_COLLECTION = "planning_todo";
 const INFO_COLLECTION = "planning_bandeau";
 
 const COLOR_PRESETS = ['#c0392b','#e07b39','#e0b039','#3f7d3f','#2f9e8f','#3d6fa8','#6a5acd','#a24a86','#555555'];
@@ -820,6 +865,7 @@ let tasksCache = [];
 let typesCache = [];
 let personnesCache = [];
 let approvCache = [];
+let todoCache = [];
 let approvUrgentInput = false;
 let draggedTaskId = null;
 
@@ -832,6 +878,7 @@ function switchTab(tab){
   document.getElementById('view-' + tab).classList.add('active');
   document.getElementById('tabBtn' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
   document.getElementById('weekNav').style.visibility = (tab === 'planning') ? 'visible' : 'hidden';
+  if(tab === 'todo') renderTodoList();
 }
 
 // ---- week navigation ----
@@ -2431,6 +2478,161 @@ async function clearInfoBanner(id){
 }
 
 // ============================================================================
+// TO-DO LIST (tâches attribuées par personne, avec commentaire)
+// ============================================================================
+let unsubscribeTodo = null;
+const TODO_NONE = '__aucune__';
+
+function subscribeTodo(){
+  const db = getFirebaseDb();
+  if(!db) return;
+  if(unsubscribeTodo){ unsubscribeTodo(); unsubscribeTodo = null; }
+  unsubscribeTodo = db.collection(TODO_COLLECTION).onSnapshot(snap => {
+    todoCache = [];
+    snap.forEach(doc => todoCache.push({ id: doc.id, ...doc.data() }));
+    todoCache.sort((a,b) => {
+      if(!!a.fait !== !!b.fait) return a.fait ? 1 : -1;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+    renderTodoList();
+  }, e => console.error('Erreur écoute to-do:', e));
+}
+
+function populateTodoPersonSelects(){
+  const sel = document.getElementById('todoPerson');
+  const filt = document.getElementById('todoPersonFilter');
+  const prevSel = sel.value, prevFilt = filt.value;
+  sel.innerHTML = '<option value="">— Non attribuée —</option>';
+  filt.innerHTML = '<option value="">Toutes les personnes</option><option value="' + TODO_NONE + '">Non attribuées</option>';
+  for(const p of personnesCache){
+    [sel, filt].forEach(x => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.nom; x.appendChild(o); });
+  }
+  if(Array.from(sel.options).some(o => o.value === prevSel)) sel.value = prevSel;
+  if(Array.from(filt.options).some(o => o.value === prevFilt)) filt.value = prevFilt;
+}
+
+function resetTodoForm(){
+  document.getElementById('todoFormTitle').textContent = 'Ajouter une tâche';
+  document.getElementById('todoId').value = '';
+  document.getElementById('todoLibelle').value = '';
+  document.getElementById('todoComment').value = '';
+  document.getElementById('todoPerson').value = '';
+  document.getElementById('todoSaveBtn').textContent = '+ Ajouter';
+  document.getElementById('todoCancelBtn').style.display = 'none';
+  document.getElementById('todoFormMsg').textContent = '';
+}
+
+function editTodo(t){
+  populateTodoPersonSelects();
+  document.getElementById('todoFormTitle').textContent = 'Modifier la tâche';
+  document.getElementById('todoId').value = t.id;
+  document.getElementById('todoLibelle').value = t.libelle || '';
+  document.getElementById('todoComment').value = t.commentaire || '';
+  document.getElementById('todoPerson').value = t.personneId || '';
+  document.getElementById('todoSaveBtn').textContent = '💾 Enregistrer';
+  document.getElementById('todoCancelBtn').style.display = 'inline-block';
+  document.getElementById('todoLibelle').focus();
+}
+
+async function saveTodo(){
+  const db = getFirebaseDb();
+  const msgEl = document.getElementById('todoFormMsg');
+  if(!db){ msgEl.textContent = '❌ Firebase non connecté.'; msgEl.className = 'status-note err'; return; }
+  const libelle = document.getElementById('todoLibelle').value.trim();
+  if(!libelle){ msgEl.textContent = '⚠️ La tâche est obligatoire.'; msgEl.className = 'status-note err'; return; }
+  const personneId = document.getElementById('todoPerson').value;
+  const data = {
+    libelle,
+    commentaire: document.getElementById('todoComment').value.trim(),
+    personneId,
+    updatedAt: new Date().toISOString()
+  };
+  const id = document.getElementById('todoId').value;
+  try{
+    if(id){
+      await db.collection(TODO_COLLECTION).doc(id).update(data);
+    } else {
+      await db.collection(TODO_COLLECTION).add({ ...data, fait: false, createdAt: data.updatedAt });
+    }
+    resetTodoForm();
+    msgEl.textContent = '✅ Enregistré.';
+    msgEl.className = 'status-note';
+    document.getElementById('todoLibelle').focus();
+  }catch(e){
+    console.error(e);
+    msgEl.textContent = '❌ Erreur : ' + e.message;
+    msgEl.className = 'status-note err';
+  }
+}
+
+async function toggleTodoDone(id, current){
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    await db.collection(TODO_COLLECTION).doc(id).update({ fait: !current, doneAt: !current ? new Date().toISOString() : null });
+  }catch(e){ console.error(e); }
+}
+
+async function deleteTodo(id, libelle){
+  if(!confirm('Supprimer « ' + libelle + ' » ?')) return;
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{ await db.collection(TODO_COLLECTION).doc(id).delete(); }
+  catch(e){ console.error(e); }
+}
+
+function renderTodoList(){
+  const list = document.getElementById('todoList');
+  if(!list) return;
+  populateTodoPersonSelects();
+  const showDone = document.getElementById('todoShowDone').checked;
+  const filter = document.getElementById('todoPersonFilter').value;
+  const items = todoCache.filter(t => {
+    if(t.fait && !showDone) return false;
+    if(filter === TODO_NONE) return !t.personneId;
+    if(filter) return t.personneId === filter;
+    return true;
+  });
+  list.innerHTML = '';
+  if(items.length === 0){
+    list.innerHTML = '<div class="todo-group"><div class="todo-row" style="color:#999; font-style:italic;">' +
+      (todoCache.length === 0 ? 'Aucune tâche pour l’instant — ajoutez-en une à gauche.' : 'Rien à faire ici ✅') + '</div></div>';
+    return;
+  }
+  // regroupement par personne (ordre du catalogue, puis non attribuées)
+  const groups = personnesCache.map(p => ({ key:p.id, nom:p.nom, couleur:p.couleur, items:[] }));
+  const unassigned = { key:'', nom:'Non attribuées', couleur:'#8a8f98', items:[] };
+  for(const t of items){
+    const g = groups.find(x => x.key === t.personneId);
+    (g || unassigned).items.push(t);
+  }
+  for(const g of groups.concat([unassigned])){
+    if(!g.items.length) continue;
+    const box = document.createElement('div');
+    box.className = 'todo-group';
+    const open = g.items.filter(t => !t.fait).length;
+    box.innerHTML =
+      '<div class="todo-group-head"><span class="swatch" style="background:' + g.couleur + ';"></span>' + escapeHtml(g.nom) +
+      '<span class="count">' + open + ' à faire</span></div>';
+    for(const t of g.items){
+      const row = document.createElement('div');
+      row.className = 'todo-row' + (t.fait ? ' is-done' : '');
+      row.innerHTML =
+        '<input type="checkbox" ' + (t.fait ? 'checked' : '') + ' title="' + (t.fait ? 'Remettre à faire' : 'Marquer comme terminée') + '">' +
+        '<div class="todo-info"><div class="todo-libelle">' + escapeHtml(t.libelle) + '</div>' +
+        (t.commentaire ? '<div class="todo-comment">💬 ' + escapeHtml(t.commentaire) + '</div>' : '') + '</div>' +
+        '<button type="button" class="ghost small" data-action="edit">Modifier</button>' +
+        '<button type="button" class="accent small" data-action="delete">Supprimer</button>';
+      row.querySelector('input').onchange = () => toggleTodoDone(t.id, !!t.fait);
+      row.querySelector('[data-action="edit"]').onclick = () => editTodo(t);
+      row.querySelector('[data-action="delete"]').onclick = () => deleteTodo(t.id, t.libelle);
+      box.appendChild(row);
+    }
+    list.appendChild(box);
+  }
+}
+
+// ============================================================================
 // APPROVISIONNEMENTS (to-do list partagée)
 // ============================================================================
 let unsubscribeApprov = null;
@@ -2561,6 +2763,7 @@ async function appInit(){
   await Promise.all([loadTypes(), loadPersonnes()]);
   subscribeTasksForWeek();
   subscribeApprov();
+  subscribeTodo();
   subscribeInfoBanner();
   renderBoard();
   renderDossiers();
