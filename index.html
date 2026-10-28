@@ -1130,6 +1130,22 @@ function toggleDossierLibre(){
   document.getElementById('taskDossierLibre').style.display = isLibre ? 'block' : 'none';
 }
 
+// Fiches enveloppe : détail des versions et quantités (V1 — nom : qté ex.)
+function envelopeVersionsHtml(f){
+  if(!f || f.type !== 'enveloppe') return '';
+  const d = f.raw || {};
+  const n = Math.max(1, Math.min(6, parseInt(d.nbVersions, 10) || 1));
+  const rows = [];
+  for(let i = 1; i <= n; i++){
+    const label = (d['verLabel' + i] || '').toString().trim();
+    const qte = (d['verQte' + i] || '').toString().trim();
+    if(!label && !qte) continue;
+    rows.push('<div style="margin-left:10px;">V' + i + (label ? ' — ' + escapeHtml(label) : '') + (qte ? ' : <b>' + escapeHtml(qte) + '</b> ex.' : '') + '</div>');
+  }
+  if(!rows.length) return '';
+  return '<div><b>Versions / Qté :</b> ' + n + ' version' + (n > 1 ? 's' : '') + '</div>' + rows.join('');
+}
+
 function updateDossierRecap(){
   const recap = document.getElementById('taskDossierRecap');
   const selectValue = document.getElementById('taskDossier').value;
@@ -1154,6 +1170,7 @@ function updateDossierRecap(){
   html += line('Date de dépôt réelle', fmtDateDisplay(d.dateDepotReelle));
   html += line('Versions', d.version);
   html += line('Quantité totale', d.qteTotale);
+  html += envelopeVersionsHtml(f);
   html += line('Poids estimé', d.poidsEstime);
   html += line('Poids réel', d.poidsReel);
   html += line('Nombre de docs', d.nbDocs);
@@ -1567,6 +1584,7 @@ function openDossierModal(reference){
   html += line('Date de dépôt réelle', fmtDateDisplay(d.dateDepotReelle));
   html += line('Versions', d.version);
   html += line('Quantité totale', d.qteTotale);
+  html += envelopeVersionsHtml(f);
   html += line('Poids estimé', d.poidsEstime);
   html += line('Poids réel', d.poidsReel);
   html += line('Nombre de docs', d.nbDocs);
