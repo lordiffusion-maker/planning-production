@@ -827,6 +827,9 @@ function getFirebaseDb(){
   try{
     if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     firebaseDb = firebase.firestore();
+    // Si le réseau (proxy, pare-feu, antivirus) bloque le flux temps réel, bascule automatiquement
+    // sur une connexion de repli : sans ça, les mises à jour « en direct » peuvent ne jamais arriver.
+    try{ firebaseDb.settings({ experimentalAutoDetectLongPolling: true, merge: true }); }catch(e){ console.warn('Réglage réseau Firestore ignoré:', e.message); }
     return firebaseDb;
   }catch(e){ console.error(e); return null; }
 }
@@ -2343,20 +2346,47 @@ let infoMessages = [];     // tous les messages publiés
 let currentInfo = null;    // message en cours d'édition (null = nouveau)
 let editingInfoId = null;
 
+let infoStarted = false;
+let infoRetryTimer = null;
+
+function applyInfoSnapshot(snap){
+  infoMessages = [];
+  snap.forEach(doc => {
+    const d = doc.data();
+    if(d && d.message && d.message.trim()) infoMessages.push({ id: doc.id, ...d });
+  });
+  infoMessages.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  renderInfoBanner();
+}
+
 function subscribeInfoBanner(){
   const db = getFirebaseDb();
   if(!db) return;
+  infoStarted = true;
   if(unsubscribeInfo){ unsubscribeInfo(); unsubscribeInfo = null; }
-  unsubscribeInfo = db.collection(INFO_COLLECTION).onSnapshot(snap => {
-    infoMessages = [];
-    snap.forEach(doc => {
-      const d = doc.data();
-      if(d && d.message && d.message.trim()) infoMessages.push({ id: doc.id, ...d });
-    });
-    infoMessages.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-    renderInfoBanner();
-  }, e => console.error('Erreur écoute bandeau:', e));
+  unsubscribeInfo = db.collection(INFO_COLLECTION).onSnapshot(applyInfoSnapshot, e => {
+    // Une écoute Firestore s'arrête définitivement à la première erreur : on la relance.
+    console.error('Erreur écoute bandeau:', e);
+    unsubscribeInfo = null;
+    clearTimeout(infoRetryTimer);
+    infoRetryTimer = setTimeout(subscribeInfoBanner, 15000);
+  });
 }
+
+// Filet de sécurité : relecture forcée depuis le serveur (retour sur l'onglet, reconnexion, toutes les 60 s).
+async function refreshInfoBanner(){
+  if(!infoStarted) return;
+  const db = getFirebaseDb();
+  if(!db) return;
+  try{
+    const snap = await db.collection(INFO_COLLECTION).get({ source: 'server' });
+    applyInfoSnapshot(snap);
+    if(!unsubscribeInfo) subscribeInfoBanner();
+  }catch(e){ console.warn('Relecture du bandeau impossible:', e.message); }
+}
+document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshInfoBanner(); });
+window.addEventListener('online', refreshInfoBanner);
+setInterval(() => { if(!document.hidden) refreshInfoBanner(); }, 60000);
 
 function renderInfoBanner(){
   const list = document.getElementById('infoBannerList');
