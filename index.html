@@ -204,6 +204,12 @@
   .extra-task-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; background:#f6f7f9; border:1px solid var(--line); border-radius:6px; padding:6px; margin-bottom:6px; }
   .extra-task-row select, .extra-task-row input[type="text"]{ flex:1; min-width:110px; }
   .extra-task-row .x-time{ flex:none; width:72px; min-width:0; }
+  .extra-task-row .x-line{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%; }
+  .extra-task-row .x-lbl{ font-size:11px; color:var(--ink-soft); width:58px; flex:none; }
+  .mini-chip{ border:1px solid var(--line); background:#fff; border-radius:12px; padding:2px 9px; font-size:11.5px; cursor:pointer; user-select:none; display:inline-flex; align-items:center; gap:4px; }
+  .mini-chip.on{ color:#fff; border-color:transparent; background:var(--accent, #2f6fed); }
+  .mini-chip .dot{ width:8px; height:8px; border-radius:50%; }
+  .extra-task-row .x-week{ flex:none; width:auto; min-width:0; }
   .info-banner{ display:flex; gap:12px; align-items:flex-start; background:#fff4d6; border:1px solid #e0b039; border-left:6px solid var(--accent); border-radius:6px; padding:10px 14px; margin-bottom:10px; }
   .info-banner-icon{ font-size:22px; line-height:1; }
   .info-banner-body{ flex:1; min-width:0; }
@@ -721,7 +727,7 @@
     <div style="display:flex; gap:10px;">
       <div class="field" style="flex:1;">
         <label>Jour</label>
-        <select id="taskJour">
+        <select id="taskJour" onchange="refreshMoreDays()">
           <option value="lundi">Lundi</option>
           <option value="mardi">Mardi</option>
           <option value="mercredi">Mercredi</option>
@@ -747,11 +753,16 @@
       </div>
     </div>
 
+    <div id="taskMoreDaysWrap" class="field">
+      <label>Répéter cette tâche sur d'autres jours de la semaine</label>
+      <div id="taskMoreDays" class="chip-picker"></div>
+    </div>
+
     <div id="taskExtraWrap" class="field">
-      <label>Autres tâches pour ce même dossier (création multiple)</label>
+      <label>Autres tâches (autre type, autre personne, autres jours…)</label>
       <div id="taskExtraList"></div>
       <button type="button" class="ghost small" onclick="addExtraTaskRow()">+ Ajouter une autre tâche</button>
-      <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">Chaque ligne crée une tâche distincte (même dossier, même semaine, même statut/urgence). Jour et horaires reprennent ceux ci-dessus par défaut.</div>
+      <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">Chaque ligne crée une tâche par jour coché, pour chaque personne cochée (même dossier, même statut/urgence). Utilise « ⧉ » pour copier une ligne.</div>
     </div>
 
     <div id="taskRecurrenceWrap" style="display:flex; gap:10px;">
@@ -1830,53 +1841,96 @@ function buildExtraOptions(sel, items, placeholder){
   sel.innerHTML = '<option value="">' + placeholder + '</option>';
   items.forEach(i => { const o = document.createElement('option'); o.value = i.value; o.textContent = i.label; sel.appendChild(o); });
 }
-function addExtraTaskRow(){
+function makeDayChips(wrap, selected){
+  wrap.innerHTML = '';
+  DAYS.forEach(d => {
+    const c = document.createElement('span');
+    c.className = 'mini-chip' + (selected.includes(d) ? ' on' : '');
+    c.dataset.day = d; c.textContent = DAY_LABELS[d].slice(0,3);
+    c.onclick = () => c.classList.toggle('on');
+    wrap.appendChild(c);
+  });
+}
+function refreshMoreDays(){
+  const wrap = document.getElementById('taskMoreDays');
+  const main = document.getElementById('taskJour').value;
+  const prev = [...wrap.querySelectorAll('.mini-chip.on')].map(c => c.dataset.day).filter(d => d !== main);
+  makeDayChips(wrap, prev);
+  wrap.querySelector('[data-day="' + main + '"]').style.display = 'none';
+}
+function addExtraTaskRow(init){
+  init = init || {};
   const list = document.getElementById('taskExtraList');
   const row = document.createElement('div');
   row.className = 'extra-task-row';
   row.innerHTML =
-    '<select class="x-type"></select>' +
+    '<div class="x-line"><select class="x-type"></select>' +
     '<input type="text" class="x-libre" placeholder="Nom de la tâche…" style="display:none;">' +
-    '<select class="x-person"></select>' +
-    '<select class="x-jour"></select>' +
     '<select class="x-debut x-time"></select>' +
     '<select class="x-fin x-time"></select>' +
-    '<button type="button" class="ghost small" title="Retirer">✕</button>';
+    '<button type="button" class="ghost small x-copy" title="Copier cette ligne">⧉</button>' +
+    '<button type="button" class="ghost small x-del" title="Retirer">✕</button></div>' +
+    '<div class="x-line"><span class="x-lbl">Personnes</span><span class="x-persons chip-picker"></span></div>' +
+    '<div class="x-line"><span class="x-lbl">Jours</span><span class="x-days chip-picker"></span>' +
+    '<select class="x-week"><option value="0">Cette semaine</option><option value="1">Semaine +1</option><option value="2">Semaine +2</option><option value="3">Semaine +3</option></select></div>';
   const typeSel = row.querySelector('.x-type');
   buildExtraOptions(typeSel, typesCache.map(t => ({ value:t.id, label:'● ' + t.nom })).concat([{ value:'__libre__', label:'✏️ Autre (saisie libre)…' }]), '— Type —');
   typeSel.onchange = () => { row.querySelector('.x-libre').style.display = typeSel.value === '__libre__' ? '' : 'none'; };
-  buildExtraOptions(row.querySelector('.x-person'), personnesCache.map(p => ({ value:p.id, label:p.nom })), '— Personne —');
-  const jourSel = row.querySelector('.x-jour');
-  jourSel.innerHTML = '';
-  DAYS.forEach(d => { const o = document.createElement('option'); o.value = d; o.textContent = DAY_LABELS[d]; jourSel.appendChild(o); });
-  jourSel.value = document.getElementById('taskJour').value;
+  const pWrap = row.querySelector('.x-persons');
+  const pSel = init.personIds || [];
+  if(!personnesCache.length) pWrap.textContent = 'Aucune personne';
+  personnesCache.forEach(p => {
+    const c = document.createElement('span');
+    c.className = 'mini-chip'; c.dataset.pid = p.id;
+    const paint = () => { c.style.background = c.classList.contains('on') ? p.couleur : ''; c.innerHTML = '<span class="dot" style="background:' + (c.classList.contains('on') ? '#fff' : p.couleur) + '"></span>' + escapeHtml(p.nom); };
+    if(pSel.includes(p.id)) c.classList.add('on');
+    paint();
+    c.onclick = () => { c.classList.toggle('on'); paint(); };
+    pWrap.appendChild(c);
+  });
+  makeDayChips(row.querySelector('.x-days'), init.days || [document.getElementById('taskJour').value]);
   const debSel = row.querySelector('.x-debut'), finSel = row.querySelector('.x-fin');
   HOURS.forEach(h => { const o = document.createElement('option'); o.value = h; o.textContent = pad(h) + 'h'; debSel.appendChild(o); });
   for(let h = HOURS[0] + 1; h <= 18; h++){ const o = document.createElement('option'); o.value = h; o.textContent = pad(h) + 'h'; finSel.appendChild(o); }
-  debSel.value = document.getElementById('taskHeure').value;
-  finSel.value = document.getElementById('taskHeureFin').value;
+  debSel.value = init.debut != null ? init.debut : document.getElementById('taskHeure').value;
+  finSel.value = init.fin != null ? init.fin : document.getElementById('taskHeureFin').value;
   debSel.onchange = () => { if(Number(finSel.value) <= Number(debSel.value)) finSel.value = Number(debSel.value) + 1; };
-  row.querySelector('button').onclick = () => row.remove();
+  if(init.type){ typeSel.value = init.type; typeSel.onchange(); }
+  if(init.libre) row.querySelector('.x-libre').value = init.libre;
+  if(init.week) row.querySelector('.x-week').value = init.week;
+  row.querySelector('.x-del').onclick = () => row.remove();
+  row.querySelector('.x-copy').onclick = () => { addExtraTaskRow(snapshotExtraRow(row)); };
   list.appendChild(row);
+}
+function stripOff(x){ const { _off, ...r } = x; return r; }
+function snapshotExtraRow(row){
+  return {
+    type: row.querySelector('.x-type').value, libre: row.querySelector('.x-libre').value,
+    personIds: [...row.querySelectorAll('.x-persons .mini-chip.on')].map(c => c.dataset.pid),
+    days: [...row.querySelectorAll('.x-days .mini-chip.on')].map(c => c.dataset.day),
+    debut: row.querySelector('.x-debut').value, fin: row.querySelector('.x-fin').value,
+    week: row.querySelector('.x-week').value
+  };
 }
 function readExtraTasks(){
   const out = [];
   for(const row of document.querySelectorAll('#taskExtraList .extra-task-row')){
-    const typeVal = row.querySelector('.x-type').value;
-    const libre = row.querySelector('.x-libre').value.trim();
-    const personId = row.querySelector('.x-person').value;
-    const debut = Number(row.querySelector('.x-debut').value);
-    const fin = Number(row.querySelector('.x-fin').value);
-    if(!typeVal && !personId) continue; // ligne vide ignorée
-    if(!typeVal || (typeVal === '__libre__' && !libre)) return { error:'⚠️ Une tâche supplémentaire n\u2019a pas de type (ou de nom libre).' };
+    const r = snapshotExtraRow(row);
+    const debut = Number(r.debut), fin = Number(r.fin);
+    if(!r.type && !r.personIds.length) continue; // ligne vide ignorée
+    if(!r.type || (r.type === '__libre__' && !r.libre.trim())) return { error:'⚠️ Une tâche supplémentaire n’a pas de type (ou de nom libre).' };
     if(fin <= debut) return { error:'⚠️ Une tâche supplémentaire a une heure de fin avant son début.' };
-    out.push({
-      typeTacheId: typeVal === '__libre__' ? '' : typeVal,
-      titreLibre: typeVal === '__libre__' ? libre : '',
-      personneIds: personId ? [personId] : [],
-      jour: row.querySelector('.x-jour').value,
-      heure: debut, heureFin: fin
-    });
+    if(!r.days.length) return { error:'⚠️ Une tâche supplémentaire n’a aucun jour coché.' };
+    // une tâche par jour coché ; plusieurs personnes = une seule tâche partagée
+    for(const day of DAYS.filter(d => r.days.includes(d))){
+      out.push({
+        typeTacheId: r.type === '__libre__' ? '' : r.type,
+        titreLibre: r.type === '__libre__' ? r.libre.trim() : '',
+        personneIds: r.personIds,
+        jour: day, heure: debut, heureFin: fin,
+        _off: Number(r.week) || 0
+      });
+    }
   }
   return { tasks: out };
 }
@@ -1891,6 +1945,8 @@ function openTaskModal(task, presetDay, presetHour){
   populateTypeSelect();
   document.getElementById('taskRecurrenceWrap').style.display = task ? 'none' : 'flex';
   document.getElementById('taskExtraWrap').style.display = task ? 'none' : '';
+  document.getElementById('taskMoreDaysWrap').style.display = task ? 'none' : '';
+  document.getElementById('taskMoreDays').innerHTML = '';
   document.getElementById('taskExtraList').innerHTML = '';
   document.getElementById('taskRecurrence').value = 'aucune';
   document.getElementById('taskOccurrences').value = 8;
@@ -1953,6 +2009,7 @@ function openTaskModal(task, presetDay, presetHour){
     document.getElementById('taskHeureFin').value = Number(document.getElementById('taskHeure').value) + 1;
     document.getElementById('taskStatut').value = 'a_faire';
     populatePersonChips([]);
+    refreshMoreDays();
     taskUrgent = false;
     document.getElementById('taskUrgentBtn').classList.remove('is-urgent');
     document.getElementById('taskUrgentBtn').textContent = '🚨 Marquer comme urgent';
@@ -2019,6 +2076,10 @@ async function saveTask(){
     const extra = readExtraTasks();
     if(extra.error){ msgEl.textContent = extra.error; msgEl.className = 'status-note err'; return; }
     extraTasks = extra.tasks;
+    // jours supplémentaires de la tâche principale (mêmes horaires/personnes/type)
+    const mainDay = document.getElementById('taskJour').value;
+    const more = [...document.querySelectorAll('#taskMoreDays .mini-chip.on')].map(c => c.dataset.day).filter(d => d !== mainDay);
+    DAYS.filter(d => more.includes(d)).forEach(d => extraTasks.unshift({ jour:d, _off:0 }));
   }
   const recurrence = taskId ? 'aucune' : document.getElementById('taskRecurrence').value;
   const occurrences = Math.min(52, Math.max(2, Number(document.getElementById('taskOccurrences').value) || 8));
@@ -2045,8 +2106,8 @@ async function saveTask(){
         const xGroupId = recurrenceGroupId + '_x' + xi;
         for(let i = 0; i < occurrences; i++){
           batch.set(db.collection(TASKS_COLLECTION).doc(), {
-            ...payload, ...x,
-            semaine: isoDate(addDays(taskModalMonday || currentMonday, i * intervalWeeks * 7)),
+            ...payload, ...stripOff(x),
+            semaine: isoDate(addDays(taskModalMonday || currentMonday, i * intervalWeeks * 7 + (x._off || 0) * 7)),
             recurrenceGroupId: xGroupId,
             recurrenceLabel: { hebdomadaire:'Hebdomadaire', toutes_2_semaines:'Toutes les 2 semaines', mensuelle:'Mensuelle' }[recurrence],
             createdAt: payload.updatedAt
@@ -2060,7 +2121,7 @@ async function saveTask(){
       const batch = db.batch();
       batch.set(db.collection(TASKS_COLLECTION).doc(), payload);
       for(const x of extraTasks){
-        batch.set(db.collection(TASKS_COLLECTION).doc(), { ...payload, ...x });
+        batch.set(db.collection(TASKS_COLLECTION).doc(), { ...payload, ...stripOff(x), semaine: isoDate(addDays(taskModalMonday || currentMonday, (x._off || 0) * 7)) });
       }
       await batch.commit();
     }
