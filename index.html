@@ -2004,7 +2004,7 @@ function openTaskModal(task, presetDay, presetHour){
     document.getElementById('taskTypeLibre').value = '';
     toggleTaskTypeLibre();
     document.getElementById('taskDescription').value = '';
-    document.getElementById('taskJour').value = presetDay || 'lundi';
+    document.getElementById('taskJour').value = presetDay || DAYS[new Date().getDay() - 1] || 'lundi'; // jour en cours (week-end → lundi)
     document.getElementById('taskHeure').value = (presetHour !== undefined && presetHour !== null) ? presetHour : HOURS[0];
     document.getElementById('taskHeureFin').value = Number(document.getElementById('taskHeure').value) + 1;
     document.getElementById('taskStatut').value = 'a_faire';
